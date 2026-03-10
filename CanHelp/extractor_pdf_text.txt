@@ -1,0 +1,29 @@
+import pdfplumber
+
+def explorer_pdf(chemin_pdf):
+    with pdfplumber.open(chemin_pdf) as pdf:
+        
+        print(f"📄 Nombre de pages : {len(pdf.pages)}")
+        print("=" * 60)
+        
+        for i, page in enumerate(pdf.pages):
+            print(f"\n--- PAGE {i+1} ---")
+            
+            # Extraire le texte brut
+            texte = page.extract_text()
+            if texte:
+                print(texte)
+            else:
+                print("(page vide ou image)")
+            
+            # Détecter les tableaux
+            tableaux = page.extract_tables()
+            if tableaux:
+                print(f"\n✅ {len(tableaux)} tableau(x) détecté(s) sur cette page")
+                for j, tableau in enumerate(tableaux):
+                    print(f"\n  Tableau {j+1} :")
+                    for ligne in tableau:
+                        print(f"    {ligne}")
+
+# Remplacez par le nom de votre PDF
+explorer_pdf("pdfs/open_positions_morgan_stanley.pdf")
