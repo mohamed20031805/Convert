@@ -112,3 +112,10 @@ def extraire_positions(chemin_pdf):
 
     print(f"\n📊 BAML - Total lignes : {len(toutes_les_lignes)}")
     return toutes_les_lignes
+
+
+
+python -c "
+from formats import baml
+lignes = baml.extraire_positions(r'T:\Dallas\CSS-BOC\CTL\REC\Réconciliation dérivés listés\FUND CHANNEL\2026\BAML\MSIM_SG_EOD Daily Statement.pdf')
+"
