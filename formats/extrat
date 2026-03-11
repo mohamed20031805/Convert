@@ -1,21 +1,7 @@
-def formater_output(lignes):
-    import pandas as pd
-    df = pd.DataFrame(lignes)
-    
-    print(f"   Colonnes disponibles : {list(df.columns)}")
-    
-    # Accepter "Long" ou "Total_Long"
-    if "Long" not in df.columns and "Total_Long" not in df.columns:
-        print("⚠️  Aucune colonne Long trouvée !")
-        return df
-
-    df["Long"]  = pd.to_numeric(df["Long"],  errors="coerce").fillna(0).astype(int)
-    df["Short"] = pd.to_numeric(df["Short"], errors="coerce").fillna(0).astype(int)
-
-    resume = df.groupby(["Product", "CCY", "Mon", "Yr"], as_index=False).agg(
-        Total_Long =("Long",  "sum"),
-        Total_Short=("Short", "sum")
-    )
-    resume["Total_Long"]  = resume["Total_Long"].replace(0, "")
-    resume["Total_Short"] = resume["Total_Short"].replace(0, "")
-    return resume[["Product", "Total_Long", "Total_Short", "CCY", "Mon", "Yr"]]
+python -c "
+from formats import morgan
+lignes = morgan.extraire_positions('pdfs/Futures and Options NY customer Statements - 052BATEQ7 - 30Jan2026-4.pdf')
+print(f'Lignes extraites : {len(lignes)}')
+if lignes:
+    print(lignes[0])
+"
