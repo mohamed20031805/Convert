@@ -5,3 +5,116 @@ from formats.baml import formater_output
 df = formater_output(lignes)
 print(df.to_string())
 "
+
+
+def extraire_positions(chemin_pdf):
+    toutes_les_lignes = []
+
+    with pdfplumber.open(chemin_pdf) as pdf:
+        for i, page in enumerate(pdf.pages):
+            words = page.extract_words()
+            if not words:
+                continue
+
+            lignes_mots = {}
+            for w in words:
+                y = round(w['top'], 1)
+                if y not in lignes_mots:
+                    lignes_mots[y] = []
+                lignes_mots[y].append(w)
+
+            # Chercher entête LONG/SHORT
+            long_x = short_x = trade_x = contract_x = header_y = None
+            for y in sorted(lignes_mots.keys()):
+                mots = lignes_mots[y]
+                texte_ligne = " ".join(w['text'] for w in mots)
+                if ("LONG" in texte_ligne and "SHORT" in texte_ligne
+                        and "TRADE" in texte_ligne and "CONTRACT" in texte_ligne):
+                    for w in mots:
+                        if w['text'] == "TRADE":    trade_x    = w['x0']
+                        if w['text'] == "LONG":     long_x     = w['x0']
+                        if w['text'] == "SHORT":    short_x    = w['x0']
+                        if w['text'] == "CONTRACT": contract_x = w['x0']
+                    header_y = y
+                    print(f"\n✅ Page {i+1} - LONG x={long_x:.1f} SHORT x={short_x:.1f}")
+                    break
+
+            if not long_x or not header_y:
+                continue
+
+            TOL = 20
+            ys_sorted = sorted(lignes_mots.keys())
+            last_contract = ""
+            last_trade_date = ""
+
+            for idx, y in enumerate(ys_sorted):
+                if y <= header_y:
+                    continue
+
+                mots = lignes_mots[y]
+                texte_ligne = " ".join(w['text'] for w in mots)
+
+                # Mémoriser le dernier contract vu
+                contract_parts = []
+                for w in mots:
+                    if contract_x and w['x0'] >= contract_x - TOL:
+                        txt = w['text']
+                        if not re.match(r'^\d{3,}[\.,]', txt):
+                            contract_parts.append(txt)
+                if contract_parts:
+                    c = " ".join(contract_parts)
+                    c = re.sub(r'\s+\d{2,3}\s+[\d\.]+.*', '', c).strip()
+                    if c:
+                        last_contract = c
+
+                # Mémoriser la dernière trade date
+                for w in mots:
+                    if abs(w['x0'] - trade_x) < TOL and re.match(r'^\d{1,2}/\d{1,2}/\d{1,2}$', w['text']):
+                        last_trade_date = w['text']
+
+                # ── Ligne TOTAL : contient N* ──
+                if not re.search(r'\b\d+\*', texte_ligne):
+                    continue
+
+                long_val  = ""
+                short_val = ""
+
+                for w in mots:
+                    if re.match(r'^\d+\*$', w['text']):
+                        val = w['text'].replace('*', '')
+                        dist_long  = abs(w['x0'] - long_x)
+                        dist_short = abs(w['x0'] - short_x)
+                        if dist_long < dist_short:
+                            long_val  = val
+                        else:
+                            short_val = val
+
+                if not long_val and not short_val:
+                    continue
+
+                # Parser contract
+                mon = yr = product = ccy = ""
+                mc = re.search(r'([A-Z]{3})\s+(\d{2})\s+(?:\w+\s+)?(.+)', last_contract)
+                if mc:
+                    mon     = mc.group(1)
+                    yr      = mc.group(2)
+                    product = mc.group(3).strip()
+                    ccy_m   = re.search(r'\d{2}\s+([A-Z]{2,3})\s+', last_contract)
+                    ccy     = ccy_m.group(1) if ccy_m else ""
+                else:
+                    product = last_contract
+
+                ligne_data = {
+                    "Trade Date":  last_trade_date,
+                    "Long":        long_val,
+                    "Short":       short_val,
+                    "Product":     product,
+                    "Mon":         mon,
+                    "Yr":          yr,
+                    "CCY":         ccy,
+                }
+                toutes_les_lignes.append(ligne_data)
+                print(f"  ✅ {last_trade_date} | Long={long_val} | Short={short_val} | {product} {mon} {yr} {ccy}")
+
+    print(f"\n📊 BAML - Total : {len(toutes_les_lignes)} positions")
+    return toutes_les_lignes
