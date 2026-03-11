@@ -2,8 +2,10 @@ import pdfplumber
 import re
 import pandas as pd
 
+
 def detecter(texte):
     return "MERRILL LYNCH INTERNATIONAL" in texte
+
 
 def extraire_entete(chemin_pdf, template_json=None):
     infos = {
@@ -25,14 +27,25 @@ def extraire_entete(chemin_pdf, template_json=None):
         for i, ligne in enumerate(lignes):
             if "MORGAN STANLY" in ligne or "MORGAN STANLEY" in ligne:
                 client_parts = []
-                for j in range(i, min(i+4, len(lignes))):
+                for j in range(i, min(i + 4, len(lignes))):
                     l = lignes[j].strip()
-                    if l and not any(x in l for x in ["CABOT","LONDON","UNITED","PAGE"]):
+                    if l and not any(x in l for x in ["CABOT", "LONDON", "UNITED", "PAGE"]):
                         client_parts.append(l)
                 infos["Client"] = " ".join(client_parts)
                 break
+
+    if template_json:
+        import json, os
+        if os.path.exists(template_json):
+            with open(template_json) as f:
+                t = json.load(f)
+            for k, v in t.items():
+                if not infos.get(k):
+                    infos[k] = v
+
     print(f"✅ Entête BAML : {infos}")
     return infos
+
 
 def extraire_positions(chemin_pdf):
     toutes_les_lignes = []
@@ -43,6 +56,7 @@ def extraire_positions(chemin_pdf):
             if not words:
                 continue
 
+            # Regrouper par Y
             lignes_mots = {}
             for w in words:
                 y = round(w['top'], 1)
@@ -63,7 +77,7 @@ def extraire_positions(chemin_pdf):
                         if w['text'] == "SHORT":    short_x    = w['x0']
                         if w['text'] == "CONTRACT": contract_x = w['x0']
                     header_y = y
-                    print(f"\n✅ Page {i+1} - TRADE x={trade_x:.1f} LONG x={long_x:.1f} SHORT x={short_x:.1f} CONTRACT x={contract_x:.1f}")
+                    print(f"\n✅ Page {i+1} - LONG x={long_x:.1f} SHORT x={short_x:.1f} CONTRACT x={contract_x:.1f}")
                     break
 
             if not long_x or not header_y:
@@ -72,16 +86,16 @@ def extraire_positions(chemin_pdf):
             TOL = 25
             ys_sorted = [y for y in sorted(lignes_mots.keys()) if y > header_y]
 
-            # Mémoriser le dernier contract vu sur une ligne de données
-            last_contract = ""
+            last_contract   = ""
+            last_trade_date = ""
 
             for y in ys_sorted:
                 mots = lignes_mots[y]
                 texte_ligne = " ".join(w['text'] for w in mots)
 
-                # Ignorer AVG, PAGE, entêtes système
+                # Ignorer lignes système
                 if any(x in texte_ligne for x in [
-                    "AVG ", "CLOSE", "PAGE", "MERRILL", "FUTURES", "KING",
+                    "AVG ", "PAGE", "MERRILL", "FUTURES", "KING",
                     "LONDON", "MORGAN", "FUND", "FCH", "CABOT", "UNITED",
                     "KINGDOM", "CONFIRMATION", "ACCEPTED", "PURCHASE",
                     "SALE", "------", "SETTL", "DEBIT", "COMMISSION",
@@ -90,14 +104,20 @@ def extraire_positions(chemin_pdf):
                 ]):
                     continue
 
-                # ── Ligne TOTAL : contient N* ──
-                total_match = re.search(r'\b(\d+)\*', texte_ligne)
+                # Mémoriser Trade Date
+                for w in mots:
+                    if abs(w['x0'] - trade_x) < TOL and re.match(r'^\d{1,2}/\d{1,2}/\d{1,2}$', w['text']):
+                        last_trade_date = w['text']
+
+                # ── Ligne TOTAL : contient N* (avec ou sans virgule) ──
+                total_match = re.search(r'\b[\d,]+\*', texte_ligne)
                 if total_match:
                     long_val  = ""
                     short_val = ""
+
                     for w in mots:
-                        if re.match(r'^\d+\*$', w['text']):
-                            val = w['text'].replace('*', '')
+                        if re.match(r'^[\d,]+\*$', w['text']):
+                            val = w['text'].replace('*', '').replace(',', '')
                             dist_long  = abs(w['x0'] - long_x)
                             dist_short = abs(w['x0'] - short_x)
                             if dist_long < dist_short:
@@ -108,53 +128,56 @@ def extraire_positions(chemin_pdf):
                     if not long_val and not short_val:
                         continue
 
-                    # ── Capturer la valeur TRADE (mot numérique le plus proche de trade_x) ──
-                    trade_val = ""
-                    if trade_x is not None:
-                        best_dist = float('inf')
-                        for w in mots:
-                            if re.match(r'^\d+\*?$', w['text']):
-                                dist = abs(w['x0'] - trade_x)
-                                if dist < best_dist:
-                                    best_dist = dist
-                                    trade_val = w['text'].replace('*', '')
-
-                    # Parser contract : "06 MAR 26 EUR EUR-BUND"
+                    # Parser contract
                     mon = yr = product = ccy = ""
-                    mc = re.search(r'([A-Z]{3})\s+(\d{2})\s+(?:([A-Z]{2,3})\s+)?(.+)', last_contract)
+
+                    # Format "06 MAR 26 EUR EUR-BUND"
+                    mc = re.search(
+                        r'\d{2}\s+([A-Z]{3})\s+(\d{2})\s+(?:([A-Z]{2,3})\s+)?(.+)',
+                        last_contract
+                    )
                     if mc:
                         mon     = mc.group(1)
                         yr      = mc.group(2)
                         ccy     = mc.group(3) or ""
                         product = mc.group(4).strip()
                     else:
-                        product = last_contract
+                        # Format "MAR 26 CBT ULT TNOTE" ou "MAR 26 EURO-BTP"
+                        mc2 = re.search(
+                            r'([A-Z]{3})\s+(\d{2})\s+(?:([A-Z]{2,3})\s+)?(.+)',
+                            last_contract
+                        )
+                        if mc2:
+                            mon     = mc2.group(1)
+                            yr      = mc2.group(2)
+                            ccy     = mc2.group(3) or ""
+                            product = mc2.group(4).strip()
+                        else:
+                            product = last_contract
 
                     ligne_data = {
-                        "Trade Date":  "",
-                        "Trade":       trade_val,
-                        "Long":        long_val,
-                        "Short":       short_val,
-                        "Product":     product,
-                        "Mon":         mon,
-                        "Yr":          yr,
-                        "CCY":         ccy,
+                        "Trade Date": last_trade_date,
+                        "Long":       long_val,
+                        "Short":      short_val,
+                        "Product":    product,
+                        "Mon":        mon,
+                        "Yr":         yr,
+                        "CCY":        ccy,
                     }
                     toutes_les_lignes.append(ligne_data)
-                    print(f"  ✅ Trade={trade_val} | Long={long_val} | Short={short_val} | {product} {mon} {yr} {ccy}")
+                    print(f"  ✅ {last_trade_date} | Long={long_val} | Short={short_val} | {product} {mon} {yr} {ccy}")
                     continue
 
                 # ── Ligne de données : mémoriser contract ──
-                # Contract = mots à x >= contract_x, avant le prix (grand nombre décimal)
                 contract_parts = []
                 for w in mots:
                     if w['x0'] >= contract_x - TOL:
                         txt = w['text']
-                        # Arrêter au prix (format 27 ou grand nombre)
+                        # Arrêter au EX (nombre 2 chiffres ex: 27) ou prix décimal
                         if re.match(r'^\d{3,}[\.,]', txt):
                             break
-                        if re.match(r'^\d{1,3}$', txt) and float(txt) > 26:
-                            break  # c'est le EX (ex: 27)
+                        if re.match(r'^\d{2}$', txt) and int(txt) > 26:
+                            break
                         contract_parts.append(txt)
 
                 if contract_parts:
@@ -169,16 +192,13 @@ def formater_output(lignes):
     if df.empty:
         return df
 
-    df["Trade"] = pd.to_numeric(df["Trade"], errors="coerce").fillna(0).astype(int)
     df["Long"]  = pd.to_numeric(df["Long"],  errors="coerce").fillna(0).astype(int)
     df["Short"] = pd.to_numeric(df["Short"], errors="coerce").fillna(0).astype(int)
 
     resume = df.groupby(["Product", "CCY", "Mon", "Yr"], as_index=False).agg(
-        Total_Trade=("Trade", "sum"),
         Total_Long =("Long",  "sum"),
         Total_Short=("Short", "sum")
     )
-    resume["Total_Trade"] = resume["Total_Trade"].replace(0, "")
     resume["Total_Long"]  = resume["Total_Long"].replace(0, "")
     resume["Total_Short"] = resume["Total_Short"].replace(0, "")
-    return resume[["Product", "Total_Trade", "Total_Long", "Total_Short", "CCY", "Mon", "Yr"]]
+    return resume[["Product", "Total_Long", "Total_Short", "CCY", "Mon", "Yr"]]
