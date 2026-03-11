@@ -17,10 +17,10 @@ with pdfplumber.open(p) as pdf:
             lignes_mots[y] = []
         lignes_mots[y].append(w)
     
+    print('=== TOUTES LES LIGNES AVEC POSITIONS X ===')
     for y in sorted(lignes_mots.keys()):
         mots = lignes_mots[y]
         texte = ' '.join(w['text'] for w in mots)
-        # Afficher seulement les lignes qui contiennent des chiffres
-        if re.search(r'\d{5,}', texte):
-            print(f'y={y:6} | {[(w[\"text\"], round(w[\"x0\"],1)) for w in mots]}')
+        print(f'y={y:6} | {texte}')
+        print(f'         {[(w[\"text\"], round(w[\"x0\"],1)) for w in mots]}')
 "
