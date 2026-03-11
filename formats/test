@@ -1,17 +1,114 @@
-python -c "
-import pdfplumber
-p = r'T:\Dallas\CSS-BOC\CTL\REC\Réconciliation dérivés listés\FUND CHANNEL\2026\BAML\MSIM_SG_EOD Daily Statement.pdf'
-with pdfplumber.open(p) as pdf:
-    for i, page in enumerate(pdf.pages[:5]):
-        words = page.extract_words()
-        lignes_mots = {}
-        for w in words:
-            y = round(w['top'], 1)
-            if y not in lignes_mots:
-                lignes_mots[y] = []
-            lignes_mots[y].append(w)
-        for y in sorted(lignes_mots.keys()):
-            texte = ' '.join(w['text'] for w in lignes_mots[y])
-            if any(x in texte for x in ['OPEN', 'POSITION', 'LONG', 'SHORT']):
-                print(f'PAGE {i+1} y={y} | {texte}')
-"
+def extraire_positions(chemin_pdf):
+    toutes_les_lignes = []
+
+    with pdfplumber.open(chemin_pdf) as pdf:
+        for i, page in enumerate(pdf.pages):
+            words = page.extract_words()
+            if not words:
+                continue
+
+            # Regrouper par Y
+            lignes_mots = {}
+            for w in words:
+                y = round(w['top'], 1)
+                if y not in lignes_mots:
+                    lignes_mots[y] = []
+                lignes_mots[y].append(w)
+
+            # Chercher entête LONG/SHORT (peut être n'importe où sur la page)
+            long_x = short_x = trade_x = contract_x = header_y = None
+            for y in sorted(lignes_mots.keys()):
+                mots = lignes_mots[y]
+                texte_ligne = " ".join(w['text'] for w in mots)
+                if ("LONG" in texte_ligne and "SHORT" in texte_ligne 
+                    and "TRADE" in texte_ligne and "CONTRACT" in texte_ligne):
+                    for w in mots:
+                        if w['text'] == "TRADE":    trade_x    = w['x0']
+                        if w['text'] == "LONG":     long_x     = w['x0']
+                        if w['text'] == "SHORT":    short_x    = w['x0']
+                        if w['text'] == "CONTRACT": contract_x = w['x0']
+                    header_y = y
+                    print(f"\n✅ Page {i+1} - entête y={y} TRADE x={trade_x} LONG x={long_x} SHORT x={short_x} CONTRACT x={contract_x}")
+                    break
+
+            if not long_x or not header_y:
+                continue
+
+            TOL = 20
+
+            for y in sorted(lignes_mots.keys()):
+                if y <= header_y:
+                    continue
+
+                mots = lignes_mots[y]
+                texte_ligne = " ".join(w['text'] for w in mots)
+
+                # Ignorer totaux et lignes système
+                if re.search(r'\d+\*', texte_ligne):
+                    continue
+                if any(x in texte_ligne for x in [
+                    "AVG", "CLOSE", "TOTAL", "COMMISSION", "NET PROFIT",
+                    "GROSS", "CLEARING", "BROKERAGE", "PAGE", "MERRILL",
+                    "FUTURES", "KING", "LONDON", "MORGAN", "FUND", "FCH",
+                    "CABOT", "UNITED", "KINGDOM", "CONFIRMATION", "ACCEPTED",
+                    "PURCHASE", "SALE", "------", "OPEN", "SETTL", "TRADE"
+                ]):
+                    continue
+
+                trade_date = ""
+                long_val   = ""
+                short_val  = ""
+                contract_parts = []
+
+                for w in mots:
+                    x   = w['x0']
+                    txt = w['text']
+
+                    # Trade Date : x≈trade_x + format date MM/DD/Y
+                    if abs(x - trade_x) < TOL and re.match(r'^\d{1,2}/\d{1,2}/\d{1,2}$', txt):
+                        trade_date = txt
+
+                    # Long : x≈long_x + 1-4 chiffres
+                    elif abs(x - long_x) < TOL and re.match(r'^\d{1,4}$', txt):
+                        long_val = txt
+
+                    # Short : x≈short_x + 1-4 chiffres
+                    elif abs(x - short_x) < TOL and re.match(r'^\d{1,4}$', txt):
+                        short_val = txt
+
+                    # Contract : x >= contract_x
+                    elif contract_x and x >= contract_x - TOL:
+                        if re.match(r'^[A-Z0-9\-\.]+$', txt) and not re.match(r'^\d{3,}[\.,]', txt):
+                            contract_parts.append(txt)
+
+                if not trade_date or (not long_val and not short_val):
+                    continue
+
+                # Parser contract "06 MAR 26 EUR EUR-BUND"
+                contract_str = " ".join(contract_parts)
+                mc = re.search(r'([A-Z]{3})\s+(\d{2})\s+(?:\w+\s+)?(.+)', contract_str)
+                if mc:
+                    mon     = mc.group(1)
+                    yr      = mc.group(2)
+                    product = mc.group(3).strip()
+                else:
+                    mon = yr = ""
+                    product = contract_str
+
+                ccy_match = re.findall(r'\b([A-Z]{2,3})\b', contract_str)
+                ccy = ccy_match[-1] if ccy_match else ""
+
+                ligne_data = {
+                    "Trade Date": trade_date,
+                    "Long":       long_val,
+                    "Short":      short_val,
+                    "Product":    product,
+                    "Mon":        mon,
+                    "Yr":         yr,
+                    "CCY":        ccy,
+                }
+                toutes_les_lignes.append(ligne_data)
+                print(f"  ✅ {trade_date} | Long={long_val} | Short={short_val} | {product} {mon} {yr}")
+
+    print(f"\n📊 BAML - Total lignes : {len(toutes_les_lignes)}")
+    return toutes_les_lignes
