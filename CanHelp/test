@@ -2,3 +2,25 @@ python -c "
 from formats.triton import extraire_positions
 lignes = extraire_positions(r'T:\Dallas\CSS-BOC\CTL\REC\Réconciliation dérivés listés\20UGS\2026\01. JANVIER\PIRAEUS BANK\TRITON.PDF')
 "
+
+
+python -c "
+import pdfplumber, re
+p = r'T:\Dallas\CSS-BOC\CTL\REC\Réconciliation dérivés listés\20UGS\2026\01. JANVIER\PIRAEUS BANK\TRITON.PDF'
+with pdfplumber.open(p) as pdf:
+    page = pdf.pages[0]
+    words = page.extract_words()
+    lignes_mots = {}
+    for w in words:
+        y = round(w['top'], 1)
+        if y not in lignes_mots:
+            lignes_mots[y] = []
+        lignes_mots[y].append(w)
+    
+    for y in sorted(lignes_mots.keys()):
+        mots = lignes_mots[y]
+        texte = ' '.join(w['text'] for w in mots)
+        # Afficher seulement les lignes qui contiennent des chiffres
+        if re.search(r'\d{5,}', texte):
+            print(f'y={y:6} | {[(w[\"text\"], round(w[\"x0\"],1)) for w in mots]}')
+"
