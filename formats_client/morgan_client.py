@@ -13,35 +13,59 @@ MAPPING_PRODUITS = {
 }
 
 def charger_client(chemin_excel):
-    # Lire sans header d'abord pour voir la structure
+    """
+    Détecte automatiquement la ligne de header
+    en cherchant la ligne qui contient 'Portfolio' ou 'Buy'
+    """
+    # Lire sans header pour trouver la bonne ligne
     df_raw = pd.read_excel(chemin_excel, header=None)
     
-    print("=== STRUCTURE BRUTE ===")
-    print(df_raw.head(10).to_string())
-    
-    # Trouver la ligne qui contient les vrais headers
     header_row = 0
+    code_client = ""
+    
     for i, row in df_raw.iterrows():
-        valeurs = [str(v).strip().lower() for v in row if pd.notna(v)]
-        if any("portfolio" in v or "portefol" in v for v in valeurs):
-            header_row = i
-            print(f"✅ Header trouvé à la ligne {i} : {list(row)}")
-            break
+        valeurs = [str(v).strip() for v in row if pd.notna(v)]
+        texte_ligne = " ".join(valeurs)
+        
+        # Chercher le code client dans PortGroup
+        if "PortGroup" in texte_ligne or "PortGroup" in texte_ligne:
+            m = re.search(r'PortGroup\s*=\s*([^\n]+)', texte_ligne)
+            if m:
+                print(f"   PortGroup trouvé : {m.group(1)}")
+        
+        # Chercher la ligne header : contient "Portfolio" et "Current Face"
+        if any("Portfolio" in v or "Buy" in v for v in valeurs):
+            if any("Face" in v or "Sec" in v for v in valeurs):
+                header_row = i
+                print(f"✅ Header trouvé à la ligne {i+1} : {valeurs[:5]}")
+                break
     
     # Relire avec le bon header
     df = pd.read_excel(chemin_excel, header=header_row)
-    
-    # Aplatir toutes les colonnes (supprimer MultiIndex si présent)
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = [' '.join(str(c) for c in col if 'Unnamed' not in str(c)).strip() 
-                     for col in df.columns]
-    
     df.columns = df.columns.str.strip()
     
-    print(f"\n✅ Colonnes finales : {list(df.columns)}")
+    print(f"✅ Colonnes : {list(df.columns)}")
     print(df.head(3).to_string())
     
     return df
+
+
+def extraire_code_client(df):
+    """
+    Cherche le code client dans la colonne Portfolio.
+    Ex: '3775T' → '3775T'
+    """
+    col = next((c for c in df.columns if "portfolio" in c.lower() or "portefol" in c.lower()), None)
+    if not col:
+        print("⚠️  Colonne Portfolio non trouvée !")
+        return ""
+    
+    for val in df[col].dropna():
+        val = str(val).strip()
+        if val and val != "nan":
+            print(f"   Code client : {val}")
+            return val
+    return ""
 
 def agréger_client(df):
     df = df.copy()
@@ -97,17 +121,7 @@ def agréger_client(df):
     return resume
 
 
-def extraire_code_client(df):
-    col = next((c for c in df.columns if "portefol" in c.lower() or "portfolio" in c.lower()), None)
-    if not col:
-        return ""
-    for val in df[col].dropna():
-        val = str(val).strip()
-        m = re.search(r'-(\d+)', val)
-        if m:
-            return m.group(1)
-        return val
-    return ""
+
 def normaliser(texte):
     texte = str(texte).upper().strip()
     texte = re.sub(r'[^A-Z0-9]', '', texte)
@@ -204,4 +218,5 @@ def joindre(df_pdf, df_client):
     return pd.DataFrame(resultats, columns=[
         "Portfolio", "Product", "Mon", "Yr", "CCY", "Sec Desc",
         "PDF_Long", "PDF_Short", "Client_Long", "Client_Short", "Status"
+
     ])
