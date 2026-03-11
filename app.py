@@ -140,53 +140,54 @@ if st.session_state.extraction_done:
     # ══════════════════════════════════════════
     # 4. Comparaison Doc Client (Morgan uniquement)
     # ══════════════════════════════════════════
-    if nom_format == "morgan":
+if nom_format == "morgan":
         st.divider()
         st.subheader("4️⃣  Comparer avec le Doc Client")
-
         client_file = st.file_uploader(
             "Chargez le fichier Excel client Morgan",
             type=["xlsx", "xls"],
             key="client_upload"
         )
-
         if client_file is not None:
             with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp_client:
                 tmp_client.write(client_file.read())
                 tmp_client_path = tmp_client.name
-
             try:
                 df_client_raw = charger_client(tmp_client_path)
-                df_client     = agréger_client(df_client_raw)
                 code_client   = extraire_code_client(df_client_raw)
 
-                st.info(f"🔑 Code client détecté : **{code_client}**")
+                # ── Extraire le code du PDF (ex: 3757 depuis "STRATEGY - 3757") ──
+                import re
+                code_pdf = ""
+                client_str = entete.get("Client", "")
+                m = re.search(r'-\s*(\d+)', client_str)
+                if m:
+                    code_pdf = m.group(1)
+
+                st.info(f"🔑 Code client détecté : **{code_client}** | Filtre PDF : **{code_pdf}**")
+
+                # ── Filtrer par code PDF ──
+                df_client = agréger_client(df_client_raw, code_pdf=code_pdf)
 
                 df_compare = joindre(output_df, df_client)
-
                 st.subheader("📊 Comparaison PDF ↔ Client")
-
                 nb_ok         = len(df_compare[df_compare["Status"] == "✅ OK"])
                 nb_ecart      = len(df_compare[df_compare["Status"].str.contains("⚠️", na=False)])
                 nb_non_trouve = len(df_compare[df_compare["Status"] == "❌ NON TROUVÉ"])
-
                 col1, col2, col3 = st.columns(3)
                 col1.metric("✅ OK",          nb_ok)
                 col2.metric("⚠️ Écarts",      nb_ecart)
                 col3.metric("❌ Non trouvés", nb_non_trouve)
-
                 def colorer_status(val):
                     if val == "✅ OK":          return "background-color: #d4edda; color: #155724"
                     if "⚠️" in str(val):        return "background-color: #fff3cd; color: #856404"
                     if "❌" in str(val):        return "background-color: #f8d7da; color: #721c24"
                     return ""
-
                 st.dataframe(
                     df_compare.style.applymap(colorer_status, subset=["Status"]),
                     use_container_width=True,
                     hide_index=True
                 )
-
             except Exception as e:
                 st.error(f"❌ Erreur fichier client : {e}")
                 import traceback
@@ -245,4 +246,5 @@ if st.session_state.extraction_done:
                 st.code(traceback.format_exc())
             finally:
                 if os.path.exists(tmp_client_path):
+
                     os.remove(tmp_client_path)
