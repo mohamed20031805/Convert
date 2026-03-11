@@ -1,4 +1,18 @@
 python -c "
-from formats import baml
-lignes = baml.extraire_positions(r'T:\Dallas\CSS-BOC\CTL\REC\Réconciliation dérivés listés\FUND CHANNEL\2026\BAML\MSIM_SG_EOD Daily Statement.pdf')
+import pdfplumber, re
+p = r'T:\Dallas\CSS-BOC\CTL\REC\Réconciliation dérivés listés\FUND CHANNEL\2026\BAML\MSIM_SG_EOD Daily Statement.pdf'
+with pdfplumber.open(p) as pdf:
+    page = pdf.pages[1]  # page 2
+    words = page.extract_words()
+    lignes_mots = {}
+    for w in words:
+        y = round(w['top'], 1)
+        if y not in lignes_mots:
+            lignes_mots[y] = []
+        lignes_mots[y].append(w)
+    for y in sorted(lignes_mots.keys()):
+        mots = lignes_mots[y]
+        texte = ' '.join(w['text'] for w in mots)
+        print(f'y={y:6} | {[(w[\"text\"], round(w[\"x0\"],1)) for w in mots]}')
+" | head -40
 "
