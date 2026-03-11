@@ -1,0 +1,4 @@
+python -c "
+from formats.triton import extraire_positions
+lignes = extraire_positions(r'T:\Dallas\CSS-BOC\CTL\REC\Réconciliation dérivés listés\20UGS\2026\01. JANVIER\PIRAEUS BANK\TRITON.PDF')
+"
