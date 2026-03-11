@@ -1,8 +1,9 @@
-def extraire_positions(chemin_pdf):
-    toutes_les_lignes = []
+import pdfplumber
+import re
 
+def debug_baml(chemin_pdf, max_pages=3):
     with pdfplumber.open(chemin_pdf) as pdf:
-        for i, page in enumerate(pdf.pages):
+        for i, page in enumerate(pdf.pages[:max_pages]):
             words = page.extract_words()
             if not words:
                 continue
@@ -15,102 +16,38 @@ def extraire_positions(chemin_pdf):
                 lignes_mots[y].append(w)
 
             # Chercher entête LONG/SHORT
-            long_x = short_x = trade_x = contract_x = header_y = None
+            header_y = None
             for y in sorted(lignes_mots.keys()):
                 mots = lignes_mots[y]
                 texte_ligne = " ".join(w['text'] for w in mots)
                 if ("LONG" in texte_ligne and "SHORT" in texte_ligne
                         and "TRADE" in texte_ligne and "CONTRACT" in texte_ligne):
-                    for w in mots:
-                        if w['text'] == "TRADE":    trade_x    = w['x0']
-                        if w['text'] == "LONG":     long_x     = w['x0']
-                        if w['text'] == "SHORT":    short_x    = w['x0']
-                        if w['text'] == "CONTRACT": contract_x = w['x0']
                     header_y = y
-                    print(f"\n✅ Page {i+1} - LONG x={long_x:.1f} SHORT x={short_x:.1f} CONTRACT x={contract_x:.1f}")
+                    print(f"\n{'='*60}")
+                    print(f"PAGE {i+1} - Header trouvé à y={y}")
+                    print(f"{'='*60}")
                     break
 
-            if not long_x or not header_y:
+            if not header_y:
                 continue
 
-            TOL = 25
+            # Afficher les 40 premières lignes après le header
             ys_sorted = [y for y in sorted(lignes_mots.keys()) if y > header_y]
-
-            # Mémoriser le dernier contract vu sur une ligne de données
-            last_contract = ""
-
-            for y in ys_sorted:
+            print(f"{'Y':>8} | {'TEXTE BRUT'}")
+            print("-" * 80)
+            for y in ys_sorted[:40]:
                 mots = lignes_mots[y]
-                texte_ligne = " ".join(w['text'] for w in mots)
+                # Afficher chaque mot avec sa position x
+                detail = "  |  ".join(f"[x={w['x0']:.0f} '{w['text']}']" for w in mots)
+                texte = " ".join(w['text'] for w in mots)
+                # Marquer les lignes candidates (contiennent des chiffres)
+                has_digit = bool(re.search(r'\d', texte))
+                marker = ">>>" if has_digit else "   "
+                print(f"{marker} y={y:6.1f} | {texte}")
+                # Si la ligne contient *, afficher le détail
+                if '*' in texte or re.search(r'\b\d+\b', texte):
+                    print(f"         DETAIL: {detail}")
 
-                # Ignorer AVG, PAGE, entêtes système
-                if any(x in texte_ligne for x in [
-                    "AVG ", "CLOSE", "PAGE", "MERRILL", "FUTURES", "KING",
-                    "LONDON", "MORGAN", "FUND", "FCH", "CABOT", "UNITED",
-                    "KINGDOM", "CONFIRMATION", "ACCEPTED", "PURCHASE",
-                    "SALE", "------", "SETTL", "DEBIT", "COMMISSION",
-                    "NET PROFIT", "GROSS", "CLEARING", "BROKERAGE",
-                    "OPEN TRADE", "OPTION"
-                ]):
-                    continue
-
-                # ── Ligne TOTAL : contient N* ──
-                total_match = re.search(r'\b(\d+)\*', texte_ligne)
-                if total_match:
-                    long_val  = ""
-                    short_val = ""
-                    for w in mots:
-                        if re.match(r'^\d+\*$', w['text']):
-                            val = w['text'].replace('*', '')
-                            dist_long  = abs(w['x0'] - long_x)
-                            dist_short = abs(w['x0'] - short_x)
-                            if dist_long < dist_short:
-                                long_val  = val
-                            else:
-                                short_val = val
-
-                    if not long_val and not short_val:
-                        continue
-
-                    # Parser contract : "06 MAR 26 EUR EUR-BUND"
-                    mon = yr = product = ccy = ""
-                    mc = re.search(r'([A-Z]{3})\s+(\d{2})\s+(?:([A-Z]{2,3})\s+)?(.+)', last_contract)
-                    if mc:
-                        mon     = mc.group(1)
-                        yr      = mc.group(2)
-                        ccy     = mc.group(3) or ""
-                        product = mc.group(4).strip()
-                    else:
-                        product = last_contract
-
-                    ligne_data = {
-                        "Trade Date":  "",
-                        "Long":        long_val,
-                        "Short":       short_val,
-                        "Product":     product,
-                        "Mon":         mon,
-                        "Yr":          yr,
-                        "CCY":         ccy,
-                    }
-                    toutes_les_lignes.append(ligne_data)
-                    print(f"  ✅ Long={long_val} | Short={short_val} | {product} {mon} {yr} {ccy}")
-                    continue
-
-                # ── Ligne de données : mémoriser contract ──
-                # Contract = mots à x >= contract_x, avant le prix (grand nombre décimal)
-                contract_parts = []
-                for w in mots:
-                    if w['x0'] >= contract_x - TOL:
-                        txt = w['text']
-                        # Arrêter au prix (format 27 ou grand nombre)
-                        if re.match(r'^\d{3,}[\.,]', txt):
-                            break
-                        if re.match(r'^\d{1,3}$', txt) and float(txt) > 26:
-                            break  # c'est le EX (ex: 27)
-                        contract_parts.append(txt)
-
-                if contract_parts:
-                    last_contract = " ".join(contract_parts).strip()
-
-    print(f"\n📊 BAML - Total : {len(toutes_les_lignes)} positions")
-    return toutes_les_lignes
+# Lancer le debug
+chemin = r"T:\Dallas\CSS-BOC\CTL\REC\Réconciliation dérivés listés"  # ← adapter le chemin
+debug_baml(chemin)
