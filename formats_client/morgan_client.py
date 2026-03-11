@@ -67,21 +67,25 @@ def extraire_code_client(df):
             return val
     return ""
 
-def agréger_client(df):
+def agréger_client(df, code_pdf=None):
+    """
+    Filtre par Portfolio qui contient le code_pdf
+    Ex: code_pdf='3757' → garde uniquement les lignes où Portfolio contient '3757'
+    """
     df = df.copy()
 
-    # Détecter colonnes avec noms exacts du fichier
-    col_portfolio = next((c for c in df.columns if "portefol" in c.lower() or "portfolio" in c.lower()), None)
+    # Détecter colonnes
+    col_portfolio = next((c for c in df.columns if "portfolio" in c.lower() or "portefol" in c.lower()), None)
     col_secdesc   = next((c for c in df.columns if c.strip() == "Sec Desc"), None)
     col_face      = next((c for c in df.columns if c.strip() == "Current Face"), None)
-    col_currency  = next((c for c in df.columns if c.strip().rstrip() == "Currency"), None)
+    col_currency  = next((c for c in df.columns if c.strip() == "Currency" or c.strip() == "Curren"), None)
 
     print(f"   Portfolio col : {col_portfolio}")
     print(f"   Sec Desc  col : {col_secdesc}")
     print(f"   Face      col : {col_face}")
     print(f"   Currency  col : {col_currency}")
 
-    # Renommer pour uniformiser
+    # Renommer
     rename_map = {}
     if col_portfolio: rename_map[col_portfolio] = "Portfolio"
     if col_secdesc:   rename_map[col_secdesc]   = "Sec Desc"
@@ -89,11 +93,17 @@ def agréger_client(df):
     if col_currency:  rename_map[col_currency]   = "Currency"
     df = df.rename(columns=rename_map)
 
-    # Garder uniquement les colonnes utiles
+    # ── Filtrer par code client PDF ──
+    if code_pdf and "Portfolio" in df.columns:
+        code_norm = str(code_pdf).strip()
+        avant = len(df)
+        df = df[df["Portfolio"].astype(str).str.contains(code_norm, na=False)]
+        print(f"   Filtre Portfolio '{code_norm}' : {avant} → {len(df)} lignes")
+
+    # Garder colonnes utiles
     cols_dispo = [c for c in ["Portfolio", "Sec Desc", "Current Face", "Currency"] if c in df.columns]
     df = df[cols_dispo].copy()
 
-    # Supprimer les lignes sans Sec Desc
     df = df.dropna(subset=["Sec Desc"])
     df = df[df["Sec Desc"].astype(str).str.strip() != ""]
 
@@ -101,14 +111,12 @@ def agréger_client(df):
     df["Client_Long"]  = df["Current Face"].apply(lambda x: x  if x > 0 else 0)
     df["Client_Short"] = df["Current Face"].apply(lambda x: -x if x < 0 else 0)
 
-    # Grouper par Sec Desc + Portfolio
     group_cols = [c for c in ["Sec Desc", "Portfolio"] if c in df.columns]
     resume = df.groupby(group_cols, as_index=False).agg(
         Client_Long =("Client_Long",  "sum"),
         Client_Short=("Client_Short", "sum")
     )
 
-    # Récupérer Currency par première valeur
     if "Currency" in df.columns:
         df_currency = df[["Sec Desc", "Currency"]].drop_duplicates("Sec Desc")
         resume = resume.merge(df_currency, on="Sec Desc", how="left")
@@ -220,3 +228,4 @@ def joindre(df_pdf, df_client):
         "PDF_Long", "PDF_Short", "Client_Long", "Client_Short", "Status"
 
     ])
+
