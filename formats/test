@@ -1,1 +1,4 @@
-python -c "from formats import baml; baml.debug_baml(r'T:\Dallas\CSS-BOC\CTL\REC\Réconciliation dérivés listés\TON_FICHIER.pdf')"
+python -c "
+from formats import baml
+lignes = baml.extraire_positions(r'T:\Dallas\CSS-BOC\CTL\REC\Réconciliation dérivés listés\FUND CHANNEL\2026\BAML\MSIM_SG_EOD Daily Statement .pdf')
+" 
