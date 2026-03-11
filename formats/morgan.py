@@ -21,12 +21,12 @@ def extraire_entete(chemin_pdf, template_json=None):
         ligne = ligne.strip()
         if not ligne or any(s in ligne for s in fin_entete):
             break
-        m = re.search(r'Account\s+([A-Z0-9]+\s*/\s*[A-Z0-9]+)', ligne)
-        if m and not infos["Account"]:
-            infos["Account"] = m.group(1).strip()
-        m = re.search(r'Close of Business\s+(.+)', ligne)
-        if m and not infos["Close of Business"]:
-            infos["Close of Business"] = m.group(1).strip()
+        m = re.search(r'Account\s+([A-Z0-9]+\s*/\s*[A-Z0-9]+).*Close of Business\s+(.+)', ligne)
+        if m:
+            if not infos["Account"]:
+                infos["Account"] = m.group(1).strip()
+            if not infos["Close of Business"]:
+                infos["Close of Business"] = m.group(2).strip()
 
     print(f"\n✅ Entête Morgan : {infos}")
     return infos
@@ -80,7 +80,8 @@ def extraire_positions(chemin_pdf):
 
             for ligne in lignes_texte:
                 ligne = ligne.strip()
-                if re.match(r'^Date\s+Call\s+Price\s+Ref', ligne):
+                if re.match(r'^Date\s+Long\s+Short', ligne.strip()) or \
+                   re.match(r'^Date\s+Call\s+Price\s+Ref', ligne.strip()):
                     dans_bloc = True
                     continue
                 if not dans_bloc:
@@ -146,4 +147,5 @@ def formater_output(lignes):
     )
     resume["Total_Long"]  = resume["Total_Long"].replace(0, "")
     resume["Total_Short"] = resume["Total_Short"].replace(0, "")
+
     return resume[["Product", "Total_Long", "Total_Short", "CCY", "Mon", "Yr"]]
