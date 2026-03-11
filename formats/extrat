@@ -1,0 +1,106 @@
+def extraire_positions(chemin_pdf):
+    toutes_les_lignes = []
+
+    with pdfplumber.open(chemin_pdf) as pdf:
+        for i, page in enumerate(pdf.pages):
+            texte = page.extract_text()
+            if not texte or "OPEN POSITIONS STATEMENT" not in texte:
+                continue
+
+            print(f"\n✅ OPEN POSITIONS trouvé - Page {i+1}")
+
+            words = page.extract_words()
+
+            # Regrouper mots par Y
+            lignes_mots = {}
+            for w in words:
+                y = round(w['top'], 1)
+                if y not in lignes_mots:
+                    lignes_mots[y] = []
+                lignes_mots[y].append(w)
+
+            # Trouver positions X des colonnes depuis l'entête
+            trade_date_x   = None
+            trade_number_x = None
+            long_x         = None
+            short_x        = None
+
+            for y in sorted(lignes_mots.keys()):
+                mots = lignes_mots[y]
+                texte_ligne = " ".join(w['text'] for w in mots)
+                if "LONG" in texte_ligne and "SHORT" in texte_ligne and "NUMBER" in texte_ligne:
+                    for w in mots:
+                        if w['text'] == "DATE" and trade_date_x is None:
+                            trade_date_x = w['x0']
+                        if w['text'] == "NUMBER":
+                            trade_number_x = w['x0']
+                        if w['text'] == "LONG":
+                            long_x = w['x0']
+                        if w['text'] == "SHORT":
+                            short_x = w['x0']
+                    print(f"   DATE x={trade_date_x}, NUMBER x={trade_number_x}, LONG x={long_x}, SHORT x={short_x}")
+                    break
+
+            if not long_x or not short_x:
+                continue
+
+            # Tolérance de position X
+            TOL = 30
+
+            dans_bloc = False
+
+            for y in sorted(lignes_mots.keys()):
+                mots = lignes_mots[y]
+                texte_ligne = " ".join(w['text'] for w in mots)
+
+                if "OPEN POSITIONS STATEMENT" in texte_ligne:
+                    dans_bloc = True
+                    continue
+
+                if not dans_bloc:
+                    continue
+
+                if any(x in texte_ligne for x in ["TOTAL", "CONTRACT", "MATURITY", "SETTLEMENT", "NO POSITIONS"]):
+                    continue
+
+                # Extraire chaque champ par position X
+                trade_date   = ""
+                trade_number = ""
+                long_val     = ""
+                short_val    = ""
+
+                for w in mots:
+                    x   = w['x0']
+                    txt = w['text']
+
+                    # Trade Date : près de trade_date_x + format date
+                    if abs(x - trade_date_x) < TOL and re.match(r'^\d{2}/\d{2}/\d{2}$', txt):
+                        trade_date = txt
+
+                    # Trade Number : près de trade_number_x + 8 chiffres
+                    elif abs(x - trade_number_x) < TOL and re.match(r'^\d{7,9}$', txt):
+                        trade_number = txt
+
+                    # Long : près de long_x + petit nombre
+                    elif abs(x - long_x) < TOL and re.match(r'^\d{1,4}$', txt):
+                        long_val = txt
+
+                    # Short : près de short_x + petit nombre
+                    elif abs(x - short_x) < TOL and re.match(r'^\d{1,4}$', txt):
+                        short_val = txt
+
+                # Garder seulement les lignes avec trade_date ET trade_number
+                if not trade_date or not trade_number:
+                    continue
+
+                ligne = {
+                    "Trade Date":   trade_date,
+                    "Trade Number": trade_number,
+                    "Long":         long_val,
+                    "Short":        short_val,
+                }
+                toutes_les_lignes.append(ligne)
+                print(f"  ✅ {trade_date} | {trade_number} | Long={long_val} | Short={short_val}")
+
+    print(f"\n📊 Triton - Total lignes : {len(toutes_les_lignes)}")
+    return toutes_les_lignes
