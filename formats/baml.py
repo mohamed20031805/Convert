@@ -63,7 +63,7 @@ def extraire_positions(chemin_pdf):
                         if w['text'] == "SHORT":    short_x    = w['x0']
                         if w['text'] == "CONTRACT": contract_x = w['x0']
                     header_y = y
-                    print(f"\n✅ Page {i+1} - LONG x={long_x:.1f} SHORT x={short_x:.1f} CONTRACT x={contract_x:.1f}")
+                    print(f"\n✅ Page {i+1} - TRADE x={trade_x:.1f} LONG x={long_x:.1f} SHORT x={short_x:.1f} CONTRACT x={contract_x:.1f}")
                     break
 
             if not long_x or not header_y:
@@ -108,6 +108,17 @@ def extraire_positions(chemin_pdf):
                     if not long_val and not short_val:
                         continue
 
+                    # ── Capturer la valeur TRADE (mot numérique le plus proche de trade_x) ──
+                    trade_val = ""
+                    if trade_x is not None:
+                        best_dist = float('inf')
+                        for w in mots:
+                            if re.match(r'^\d+\*?$', w['text']):
+                                dist = abs(w['x0'] - trade_x)
+                                if dist < best_dist:
+                                    best_dist = dist
+                                    trade_val = w['text'].replace('*', '')
+
                     # Parser contract : "06 MAR 26 EUR EUR-BUND"
                     mon = yr = product = ccy = ""
                     mc = re.search(r'([A-Z]{3})\s+(\d{2})\s+(?:([A-Z]{2,3})\s+)?(.+)', last_contract)
@@ -121,6 +132,7 @@ def extraire_positions(chemin_pdf):
 
                     ligne_data = {
                         "Trade Date":  "",
+                        "Trade":       trade_val,
                         "Long":        long_val,
                         "Short":       short_val,
                         "Product":     product,
@@ -129,7 +141,7 @@ def extraire_positions(chemin_pdf):
                         "CCY":         ccy,
                     }
                     toutes_les_lignes.append(ligne_data)
-                    print(f"  ✅ Long={long_val} | Short={short_val} | {product} {mon} {yr} {ccy}")
+                    print(f"  ✅ Trade={trade_val} | Long={long_val} | Short={short_val} | {product} {mon} {yr} {ccy}")
                     continue
 
                 # ── Ligne de données : mémoriser contract ──
@@ -150,18 +162,23 @@ def extraire_positions(chemin_pdf):
 
     print(f"\n📊 BAML - Total : {len(toutes_les_lignes)} positions")
     return toutes_les_lignes
+
+
 def formater_output(lignes):
     df = pd.DataFrame(lignes)
     if df.empty:
         return df
 
+    df["Trade"] = pd.to_numeric(df["Trade"], errors="coerce").fillna(0).astype(int)
     df["Long"]  = pd.to_numeric(df["Long"],  errors="coerce").fillna(0).astype(int)
     df["Short"] = pd.to_numeric(df["Short"], errors="coerce").fillna(0).astype(int)
 
     resume = df.groupby(["Product", "CCY", "Mon", "Yr"], as_index=False).agg(
+        Total_Trade=("Trade", "sum"),
         Total_Long =("Long",  "sum"),
         Total_Short=("Short", "sum")
     )
+    resume["Total_Trade"] = resume["Total_Trade"].replace(0, "")
     resume["Total_Long"]  = resume["Total_Long"].replace(0, "")
     resume["Total_Short"] = resume["Total_Short"].replace(0, "")
-    return resume[["Product", "Total_Long", "Total_Short", "CCY", "Mon", "Yr"]]
+    return resume[["Product", "Total_Trade", "Total_Long", "Total_Short", "CCY", "Mon", "Yr"]]
