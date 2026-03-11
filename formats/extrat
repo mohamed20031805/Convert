@@ -5,6 +5,11 @@ print(f'Lignes extraites : {len(lignes)}')
 if lignes:
     print(lignes[0])
 "
+python -c "
+import pandas as pd
+df = pd.read_excel('uploads/positions-downloadReport2026_03_02 11_28_08.xlsx')
+print(df['Portefolio'].dropna().unique())
+"
 
 
 python -c "
