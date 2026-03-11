@@ -1,111 +1,21 @@
-def extraire_positions(chemin_pdf):
-    toutes_les_lignes = []
+def formater_output(lignes):
+    import pandas as pd
+    df = pd.DataFrame(lignes)
+    
+    print(f"   Colonnes disponibles : {list(df.columns)}")
+    
+    # Accepter "Long" ou "Total_Long"
+    if "Long" not in df.columns and "Total_Long" not in df.columns:
+        print("⚠️  Aucune colonne Long trouvée !")
+        return df
 
-    with pdfplumber.open(chemin_pdf) as pdf:
-        for i, page in enumerate(pdf.pages):
-            texte = page.extract_text()
-            if not texte or "OPEN POSITIONS STATEMENT" not in texte:
-                continue
+    df["Long"]  = pd.to_numeric(df["Long"],  errors="coerce").fillna(0).astype(int)
+    df["Short"] = pd.to_numeric(df["Short"], errors="coerce").fillna(0).astype(int)
 
-            print(f"\n✅ OPEN POSITIONS trouvé - Page {i+1}")
-
-            words = page.extract_words()
-
-            # Regrouper mots par Y
-            lignes_mots = {}
-            for w in words:
-                y = round(w['top'], 1)
-                if y not in lignes_mots:
-                    lignes_mots[y] = []
-                lignes_mots[y].append(w)
-
-            # Positions X fixes basées sur le debug
-            # Trade Date   x≈228.4
-            # Trade Number x≈274.6
-            # Long         x≈316.6
-            # Short        x≈358.2
-            trade_date_x   = 228.4
-            trade_number_x = 274.6
-            long_x         = 316.6
-            short_x        = 358.2
-            TOL            = 25  # tolérance pixels
-
-            # Chercher dynamiquement si possible
-            for y in sorted(lignes_mots.keys()):
-                mots = lignes_mots[y]
-                texte_ligne = " ".join(w['text'] for w in mots)
-                if "LONG" in texte_ligne and "SHORT" in texte_ligne:
-                    for w in mots:
-                        if w['text'] == "LONG":  long_x  = w['x0']
-                        if w['text'] == "SHORT": short_x = w['x0']
-                    break
-
-            for y in sorted(lignes_mots.keys()):
-                mots = lignes_mots[y]
-                texte_ligne = " ".join(w['text'] for w in mots)
-                if "NUMBER" in texte_ligne and "DATE" in texte_ligne:
-                    for w in mots:
-                        if w['text'] == "NUMBER": trade_number_x = w['x0']
-                        if w['text'] == "DATE":   trade_date_x   = w['x0']
-                    break
-
-            print(f"   DATE x={trade_date_x}, NUMBER x={trade_number_x}, LONG x={long_x}, SHORT x={short_x}")
-
-            dans_bloc = False
-
-            for y in sorted(lignes_mots.keys()):
-                mots = lignes_mots[y]
-                texte_ligne = " ".join(w['text'] for w in mots)
-
-                if "OPEN POSITIONS STATEMENT" in texte_ligne:
-                    dans_bloc = True
-                    continue
-
-                if not dans_bloc:
-                    continue
-
-                if any(x in texte_ligne for x in [
-                    "TOTAL", "CONTRACT", "MATURITY", "SETTLEMENT",
-                    "NO POSITIONS", "PRICE", "NUMBER", "HEDGING"
-                ]):
-                    continue
-
-                trade_date   = ""
-                trade_number = ""
-                long_val     = ""
-                short_val    = ""
-
-                for w in mots:
-                    x   = w['x0']
-                    txt = w['text']
-
-                    # Trade Date : x≈228 + format DD/MM/YY
-                    if abs(x - trade_date_x) < TOL and re.match(r'^\d{2}/\d{2}/\d{2}$', txt):
-                        trade_date = txt
-
-                    # Trade Number : x≈274 + 7-9 chiffres
-                    elif abs(x - trade_number_x) < TOL and re.match(r'^\d{7,9}$', txt):
-                        trade_number = txt
-
-                    # Long : x≈316 + 1-4 chiffres
-                    elif abs(x - long_x) < TOL and re.match(r'^\d{1,4}$', txt):
-                        long_val = txt
-
-                    # Short : x≈358 + 1-4 chiffres
-                    elif abs(x - short_x) < TOL and re.match(r'^\d{1,4}$', txt):
-                        short_val = txt
-
-                if not trade_date or not trade_number:
-                    continue
-
-                ligne = {
-                    "Trade Date":   trade_date,
-                    "Trade Number": trade_number,
-                    "Long":         long_val,
-                    "Short":        short_val,
-                }
-                toutes_les_lignes.append(ligne)
-                print(f"  ✅ {trade_date} | {trade_number} | Long={long_val} | Short={short_val}")
-
-    print(f"\n📊 Triton - Total lignes : {len(toutes_les_lignes)}")
-    return toutes_les_lignes
+    resume = df.groupby(["Product", "CCY", "Mon", "Yr"], as_index=False).agg(
+        Total_Long =("Long",  "sum"),
+        Total_Short=("Short", "sum")
+    )
+    resume["Total_Long"]  = resume["Total_Long"].replace(0, "")
+    resume["Total_Short"] = resume["Total_Short"].replace(0, "")
+    return resume[["Product", "Total_Long", "Total_Short", "CCY", "Mon", "Yr"]]
