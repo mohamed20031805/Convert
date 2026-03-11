@@ -19,33 +19,37 @@ def extraire_positions(chemin_pdf):
                     lignes_mots[y] = []
                 lignes_mots[y].append(w)
 
-            # Trouver positions X des colonnes depuis l'entête
-            trade_date_x   = None
-            trade_number_x = None
-            long_x         = None
-            short_x        = None
+            # Positions X fixes basées sur le debug
+            # Trade Date   x≈228.4
+            # Trade Number x≈274.6
+            # Long         x≈316.6
+            # Short        x≈358.2
+            trade_date_x   = 228.4
+            trade_number_x = 274.6
+            long_x         = 316.6
+            short_x        = 358.2
+            TOL            = 25  # tolérance pixels
+
+            # Chercher dynamiquement si possible
+            for y in sorted(lignes_mots.keys()):
+                mots = lignes_mots[y]
+                texte_ligne = " ".join(w['text'] for w in mots)
+                if "LONG" in texte_ligne and "SHORT" in texte_ligne:
+                    for w in mots:
+                        if w['text'] == "LONG":  long_x  = w['x0']
+                        if w['text'] == "SHORT": short_x = w['x0']
+                    break
 
             for y in sorted(lignes_mots.keys()):
                 mots = lignes_mots[y]
                 texte_ligne = " ".join(w['text'] for w in mots)
-                if "LONG" in texte_ligne and "SHORT" in texte_ligne and "NUMBER" in texte_ligne:
+                if "NUMBER" in texte_ligne and "DATE" in texte_ligne:
                     for w in mots:
-                        if w['text'] == "DATE" and trade_date_x is None:
-                            trade_date_x = w['x0']
-                        if w['text'] == "NUMBER":
-                            trade_number_x = w['x0']
-                        if w['text'] == "LONG":
-                            long_x = w['x0']
-                        if w['text'] == "SHORT":
-                            short_x = w['x0']
-                    print(f"   DATE x={trade_date_x}, NUMBER x={trade_number_x}, LONG x={long_x}, SHORT x={short_x}")
+                        if w['text'] == "NUMBER": trade_number_x = w['x0']
+                        if w['text'] == "DATE":   trade_date_x   = w['x0']
                     break
 
-            if not long_x or not short_x:
-                continue
-
-            # Tolérance de position X
-            TOL = 30
+            print(f"   DATE x={trade_date_x}, NUMBER x={trade_number_x}, LONG x={long_x}, SHORT x={short_x}")
 
             dans_bloc = False
 
@@ -60,10 +64,12 @@ def extraire_positions(chemin_pdf):
                 if not dans_bloc:
                     continue
 
-                if any(x in texte_ligne for x in ["TOTAL", "CONTRACT", "MATURITY", "SETTLEMENT", "NO POSITIONS"]):
+                if any(x in texte_ligne for x in [
+                    "TOTAL", "CONTRACT", "MATURITY", "SETTLEMENT",
+                    "NO POSITIONS", "PRICE", "NUMBER", "HEDGING"
+                ]):
                     continue
 
-                # Extraire chaque champ par position X
                 trade_date   = ""
                 trade_number = ""
                 long_val     = ""
@@ -73,23 +79,22 @@ def extraire_positions(chemin_pdf):
                     x   = w['x0']
                     txt = w['text']
 
-                    # Trade Date : près de trade_date_x + format date
+                    # Trade Date : x≈228 + format DD/MM/YY
                     if abs(x - trade_date_x) < TOL and re.match(r'^\d{2}/\d{2}/\d{2}$', txt):
                         trade_date = txt
 
-                    # Trade Number : près de trade_number_x + 8 chiffres
+                    # Trade Number : x≈274 + 7-9 chiffres
                     elif abs(x - trade_number_x) < TOL and re.match(r'^\d{7,9}$', txt):
                         trade_number = txt
 
-                    # Long : près de long_x + petit nombre
+                    # Long : x≈316 + 1-4 chiffres
                     elif abs(x - long_x) < TOL and re.match(r'^\d{1,4}$', txt):
                         long_val = txt
 
-                    # Short : près de short_x + petit nombre
+                    # Short : x≈358 + 1-4 chiffres
                     elif abs(x - short_x) < TOL and re.match(r'^\d{1,4}$', txt):
                         short_val = txt
 
-                # Garder seulement les lignes avec trade_date ET trade_number
                 if not trade_date or not trade_number:
                     continue
 
