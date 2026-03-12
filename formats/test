@@ -10,3 +10,7 @@ with pdfplumber.open(p) as pdf:
                 print(repr(ligne))
         print()
 "
+
+Est-ce que les pages 14-17 ont une ligne header TRADE SETTL AT LONG SHORT CONTRACT... ?
+Quel est le format des lignes de données sur ces pages — est-ce pareil que page 2 ex: 12/05/5 F4 3 06 MAR 26 EUR EUR-BUND 27 128.2 EU 90.00DR ?
+Est-ce que le contract change sur ces pages ou c'est toujours MAR 26 FOAT ?
