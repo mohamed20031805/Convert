@@ -45,15 +45,6 @@ def extraire_entete(chemin_pdf, template_json=None):
     return infos
 
 
-def get_col_positions(header_ligne):
-    cols = {}
-    for col in ["TRADE", "LONG", "SHORT", "CONTRACT", "CC"]:
-        idx = header_ligne.find(col)
-        if idx >= 0:
-            cols[col] = idx
-    return cols
-
-
 def extraire_positions(chemin_pdf):
     toutes_les_lignes = []
 
@@ -67,124 +58,132 @@ def extraire_positions(chemin_pdf):
 
             # Chercher header
             header_idx = None
-            cols = {}
             for j, ligne in enumerate(lignes):
                 if ("LONG" in ligne and "SHORT" in ligne
                         and "TRADE" in ligne and "CONTRACT" in ligne):
-                    cols = get_col_positions(ligne)
                     header_idx = j
-                    print(f"\n✅ Page {i+1} - cols={cols}")
+                    print(f"\n✅ Page {i+1}")
                     break
 
-            if not cols or header_idx is None:
+            if header_idx is None:
                 continue
-
-            p_trade    = cols.get("TRADE",    0)
-            p_long     = cols.get("LONG",     15)
-            p_short    = cols.get("SHORT",    20)
-            p_contract = cols.get("CONTRACT", 26)
-            p_cc       = cols.get("CC",       56)
-            p_contract_end = p_cc - 3
 
             last_contract   = ""
             last_trade_date = ""
             last_cc         = ""
+            pending_total   = None
 
-            for ligne in lignes[header_idx + 2:]:
+            data_lignes = lignes[header_idx + 2:]
 
-                if any(x in ligne for x in [
-                    "AVG ", "PAGE", "MERRILL", "FUTURES", "KING",
-                    "LONDON", "MORGAN", "FUND", "FCH", "CABOT", "UNITED",
-                    "KINGDOM", "CONFIRMATION", "ACCEPTED", "PURCHASE",
-                    "SALE", "SETTL AT", "COMMISSION", "NET PROFIT",
-                    "GROSS", "CLEARING", "BROKERAGE", "OPEN TRADE",
-                    "* REG", "* SEC", "OPTION PREMIUM"
-                ]):
-                    continue
-
+            for ligne in data_lignes:
                 stripped = ligne.strip()
                 if not stripped:
                     continue
 
-                # ── Ligne TOTAL : N* ──
-                total_m = re.match(r'^([\d,]+)\*', stripped)
-                if total_m:
-                    val = total_m.group(1).replace(',', '')
-
-                    # Position du * dans la ligne originale
-                    pos_star = len(ligne) - len(ligne.lstrip()) + len(total_m.group(1))
-                    long_val  = ""
-                    short_val = ""
-                    dist_long  = abs(pos_star - (p_long  + len(total_m.group(1))))
-                    dist_short = abs(pos_star - (p_short + len(total_m.group(1))))
-                    if dist_long <= dist_short:
-                        long_val  = val
-                    else:
-                        short_val = val
-
-                    # Parser contract
-                    mon = yr = product = ccy = ""
-                    mc = re.search(
-                        r'\d{2}\s+([A-Z]{3})\s+(\d{2})\s+(?:([A-Z]{2,3})\s+)?(.+)',
-                        last_contract
-                    )
-                    if mc:
-                        mon     = mc.group(1)
-                        yr      = mc.group(2)
-                        ccy     = last_cc or mc.group(3) or ""
-                        product = mc.group(4).strip()
-                    else:
-                        mc2 = re.search(
-                            r'([A-Z]{3})\s+(\d{2})\s+(?:([A-Z]{2,3})\s+)?(.+)',
-                            last_contract
-                        )
-                        if mc2:
-                            mon     = mc2.group(1)
-                            yr      = mc2.group(2)
-                            ccy     = last_cc or mc2.group(3) or ""
-                            product = mc2.group(4).strip()
+                # ── AVG LONG / AVG SHORT → résoudre Long ou Short ──
+                if stripped.startswith("AVG LONG:") or stripped.startswith("AVG SHORT:"):
+                    if pending_total:
+                        val = pending_total["val"]
+                        if "LONG" in stripped:
+                            long_val  = val
+                            short_val = ""
                         else:
-                            product = last_contract
-                            ccy     = last_cc
+                            long_val  = ""
+                            short_val = val
+
+                        ligne_data = {
+                            "Trade Date": last_trade_date,
+                            "Long":       long_val,
+                            "Short":      short_val,
+                            "Product":    pending_total["product"],
+                            "Mon":        pending_total["mon"],
+                            "Yr":         pending_total["yr"],
+                            "CCY":        pending_total["ccy"],
+                        }
+                        toutes_les_lignes.append(ligne_data)
+                        print(f"  ✅ {last_trade_date} | L={long_val} | S={short_val} | {pending_total['product']} {pending_total['mon']} {pending_total['yr']} {pending_total['ccy']}")
+                        pending_total = None
+                    continue
+
+                # ── Ligne TOTAL : commence par N* ──
+                if re.match(r'^[\d,\.]+\*', stripped):
+                    # Ignorer COMMISSION, GROSS, CONVERTED etc
+                    if any(x in stripped for x in [
+                        "COMMISSION", "GROSS", "CONVERTED", "NET PROFIT", "SEC"
+                    ]):
+                        continue
+
+                    total_m = re.match(r'^([\d,\.]+)\*', stripped)
+                    if not total_m:
+                        continue
+                    val = total_m.group(1).replace(',', '').replace('.', '')
+
+                    # ── Contract TEL QUEL ──
+                    mon = yr = ""
+                    mc = re.search(r'([A-Z]{3})\s+(\d{2})\b', last_contract)
+                    if mc:
+                        mon = mc.group(1)
+                        yr  = mc.group(2)
+                    ccy     = last_cc
+                    product = last_contract  # TEL QUEL
 
                     if not product:
                         continue
 
-                    ligne_data = {
-                        "Trade Date": last_trade_date,
-                        "Long":       long_val,
-                        "Short":      short_val,
-                        "Product":    product,
-                        "Mon":        mon,
-                        "Yr":         yr,
-                        "CCY":        ccy,
-                    }
-                    toutes_les_lignes.append(ligne_data)
-                    print(f"  ✅ {last_trade_date} | L={long_val} | S={short_val} | {product} {mon} {yr} {ccy}")
+                    # Cas 1 : "N* CLOSE ..." sans EX → attendre AVG LONG/SHORT
+                    if "CLOSE" in stripped and "EX" not in stripped:
+                        pending_total = {
+                            "val":     val,
+                            "product": product,
+                            "mon":     mon,
+                            "yr":      yr,
+                            "ccy":     ccy,
+                        }
+
+                    # Cas 2 : "N* EX-... CLOSE ..." → Long par défaut
+                    elif "EX" in stripped and "CLOSE" in stripped:
+                        ligne_data = {
+                            "Trade Date": last_trade_date,
+                            "Long":       val,
+                            "Short":      "",
+                            "Product":    product,
+                            "Mon":        mon,
+                            "Yr":         yr,
+                            "CCY":        ccy,
+                        }
+                        toutes_les_lignes.append(ligne_data)
+                        print(f"  ✅ {last_trade_date} | L={val} | S= | {product} {mon} {yr} {ccy}")
+
                     continue
 
-                # Ignorer CLOSE
-                if stripped.startswith("CLOSE"):
+                # Ignorer lignes système
+                if any(x in ligne for x in [
+                    "PAGE", "MERRILL", "FUTURES", "KING", "LONDON",
+                    "MORGAN", "FUND", "FCH", "CABOT", "UNITED", "KINGDOM",
+                    "CONFIRMATION", "ACCEPTED", "PURCHASE", "SALE",
+                    "COMMISSION", "NET PROFIT", "GROSS", "CLEARING",
+                    "BROKERAGE", "OPEN TRADE", "* REG", "* SEC",
+                    "OPTION", "CONVERTED", "CLOSE", "------",
+                    "TRADING UNIT"
+                ]):
                     continue
 
-                # ── Ligne de données ──
-                if len(ligne) < p_contract:
-                    continue
-
-                trade_date = ligne[p_trade : p_trade + 8].strip()
-                contract   = ligne[p_contract : p_contract_end].strip() if len(ligne) > p_contract else ""
-                cc         = ligne[p_cc : p_cc + 3].strip() if len(ligne) > p_cc else ""
-
-                # Ligne avec date + contract
-                if re.match(r'^\d{1,2}/\d{1,2}/\d{1,2}$', trade_date) and contract:
-                    last_trade_date = trade_date
-                    last_contract   = contract
-                    last_cc         = cc if re.match(r'^[A-Z]{2}$', cc) else last_cc
-                    continue
-
-                # Ligne de continuation (contract sur 2 lignes)
-                if not trade_date and contract and len(stripped) > 3:
-                    last_contract = (last_contract + " " + contract).strip()
+                # ── Ligne de données : date + contract + CC ──
+                m = re.match(
+                    r'^(\d{1,2}/\d{1,2}/\d{1,2})\s+'  # date
+                    r'\w+\s+'                            # SETTL
+                    r'\w+\s+'                            # AT
+                    r'[\d,]+\s+'                         # quantité
+                    r'(.+?)\s+'                          # contract description TEL QUEL
+                    r'\d+\s+'                            # EX
+                    r'[\d\.\-]+\s+'                      # PRICE
+                    r'([A-Z]{2})\s*',                   # CC
+                    stripped
+                )
+                if m:
+                    last_trade_date = m.group(1)
+                    last_contract   = m.group(2).strip()
+                    last_cc         = m.group(3).strip()
 
     print(f"\n📊 BAML - Total : {len(toutes_les_lignes)} positions")
     return toutes_les_lignes
