@@ -1,0 +1,19 @@
+{
+  "accounts": [
+    {
+      "account_number": "T 01001 ",
+      "client_name":    "FCH MS SUSTN EUR STRTGY BOND",
+      "broker":         "baml"
+    },
+    {
+      "account_number": "96Y00568",
+      "client_name":    "FCH MS ANOTHER FUND",
+      "broker":         "baml"
+    },
+    {
+      "account_number": "99V01003",
+      "client_name":    "FCH MS THIRD FUND",
+      "broker":         "baml"
+    }
+  ]
+}
