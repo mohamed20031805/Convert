@@ -1,22 +1,4 @@
 python -c "
-import pdfplumber
-p = r'T:\Dallas\CSS-BOC\CTL\REC\Réconciliation dérivés listés\FUND CHANNEL\2026\BAML\MSIM_SG_EOD Daily Statement.pdf'
-with pdfplumber.open(p) as pdf:
-    for i, page in enumerate(pdf.pages[:9]):
-        texte = page.extract_text()
-        if not texte:
-            continue
-        lignes = texte.split('\n')
-        for j, ligne in enumerate(lignes):
-            if 'LONG' in ligne and 'SHORT' in ligne and 'CONTRACT' in ligne:
-                print(f'PAGE {i+1} HEADER: |{ligne}|')
-                # Trouver ligne tirets juste apres
-                if j+1 < len(lignes):
-                    dash = lignes[j+1]
-                    print(f'PAGE {i+1} DASH:   |{dash}|')
-                # Afficher 3 lignes de donnees
-                for k in range(j+2, min(j+6, len(lignes))):
-                    print(f'PAGE {i+1} DATA:   |{lignes[k]}|')
-                print()
-                break
+from formats import baml
+lignes = baml.extraire_positions(r'T:\Dallas\CSS-BOC\CTL\REC\Réconciliation dérivés listés\FUND CHANNEL\2026\BAML\MSIM_SG_EOD Daily Statement.pdf')
 "
