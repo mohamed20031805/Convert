@@ -47,89 +47,91 @@ def extraire_entete(chemin_pdf, template_json=None):
     return infos
 
 
+# Positions fixes des colonnes (basées sur les tirets)
+COL_TRADE    = (0,  6)
+COL_LONG     = (15, 20)
+COL_SHORT    = (20, 26)
+COL_CONTRACT = (26, 47)
+COL_CC       = (56, 58)
+
+
+def get_col(ligne, start, end):
+    """Extraire une colonne par position de caractères"""
+    if len(ligne) < start:
+        return ""
+    return ligne[start:end].strip()
+
+
 def extraire_positions(chemin_pdf):
     toutes_les_lignes = []
 
     with pdfplumber.open(chemin_pdf) as pdf:
         for i, page in enumerate(pdf.pages):
-            words = page.extract_words()
-            if not words:
+            texte = page.extract_text()
+            if not texte:
                 continue
 
-            # Regrouper par Y
-            lignes_mots = {}
-            for w in words:
-                y = round(w['top'], 1)
-                if y not in lignes_mots:
-                    lignes_mots[y] = []
-                lignes_mots[y].append(w)
+            lignes = texte.split('\n')
 
-            # Chercher entête LONG/SHORT/CC
-            long_x = short_x = trade_x = contract_x = cc_x = header_y = None
-            for y in sorted(lignes_mots.keys()):
-                mots = lignes_mots[y]
-                texte_ligne = " ".join(w['text'] for w in mots)
-                if ("LONG" in texte_ligne and "SHORT" in texte_ligne
-                        and "TRADE" in texte_ligne and "CONTRACT" in texte_ligne):
-                    for w in mots:
-                        if w['text'] == "TRADE":    trade_x    = w['x0']
-                        if w['text'] == "LONG":     long_x     = w['x0']
-                        if w['text'] == "SHORT":    short_x    = w['x0']
-                        if w['text'] == "CONTRACT": contract_x = w['x0']
-                        if w['text'] == "CC":       cc_x       = w['x0']
-                    header_y = y
-                    print(f"\n✅ Page {i+1} - TRADE x={trade_x:.1f} LONG x={long_x:.1f} SHORT x={short_x:.1f} CONTRACT x={contract_x:.1f} CC x={cc_x}")
+            # Chercher la ligne d'entête TRADE LONG SHORT CONTRACT
+            header_idx = None
+            for j, ligne in enumerate(lignes):
+                if ("LONG" in ligne and "SHORT" in ligne
+                        and "TRADE" in ligne and "CONTRACT" in ligne
+                        and "DESCRIPTION" in ligne):
+                    header_idx = j
+                    print(f"\n✅ Page {i+1} - entête ligne {j}")
                     break
 
-            if not long_x or not header_y:
+            if header_idx is None:
                 continue
-
-            TOL = 25
-            ys_sorted = [y for y in sorted(lignes_mots.keys()) if y > header_y]
 
             last_contract   = ""
             last_trade_date = ""
             last_cc         = ""
 
-            for y in ys_sorted:
-                mots = lignes_mots[y]
-                texte_ligne = " ".join(w['text'] for w in mots)
+            for ligne in lignes[header_idx + 2:]:  # +2 pour sauter les tirets
 
                 # Ignorer lignes système
-                if any(x in texte_ligne for x in [
+                if any(x in ligne for x in [
                     "AVG ", "PAGE", "MERRILL", "FUTURES", "KING",
                     "LONDON", "MORGAN", "FUND", "FCH", "CABOT", "UNITED",
                     "KINGDOM", "CONFIRMATION", "ACCEPTED", "PURCHASE",
-                    "SALE", "------", "SETTL", "DEBIT", "COMMISSION",
+                    "SALE", "SETTL", "DEBIT", "COMMISSION",
                     "NET PROFIT", "GROSS", "CLEARING", "BROKERAGE",
-                    "OPEN TRADE", "OPTION"
+                    "OPEN TRADE", "OPTION", "TRADE SETTL"
                 ]):
                     continue
 
-                # ── Ligne TOTAL : contient N* (virgule, point acceptés ex: 861.320*) ──
-                total_match = re.search(r'\b[\d,\.]+\*', texte_ligne)
+                # ── Ligne TOTAL : commence par N* ex "27* CLOSE" ──
+                total_match = re.match(r'^([\d,\.]+)\*', ligne.strip())
                 if total_match:
+                    val = total_match.group(1).replace(',', '').replace('.', '')
+
+                    # Déterminer Long ou Short selon position du N*
+                    # Le N* est dans la colonne LONG (pos 15-20) ou SHORT (pos 20-26)
+                    pos_etoile = ligne.index('*')
                     long_val  = ""
                     short_val = ""
 
-                    for w in mots:
-                        # Accepter 27* | 1,008* | 861.320*
-                        if re.match(r'^[\d,\.]+\*$', w['text']):
-                            val = w['text'].replace('*', '').replace(',', '').replace('.', '')
-                            dist_long  = abs(w['x0'] - long_x)
-                            dist_short = abs(w['x0'] - short_x)
-                            if dist_long < dist_short:
-                                long_val  = val
-                            else:
-                                short_val = val
+                    if COL_LONG[0] <= pos_etoile <= COL_LONG[1] + 5:
+                        long_val  = val
+                    elif COL_SHORT[0] <= pos_etoile <= COL_SHORT[1] + 5:
+                        short_val = val
+                    else:
+                        # Par défaut chercher lequel est le plus proche
+                        dist_long  = abs(pos_etoile - COL_LONG[0])
+                        dist_short = abs(pos_etoile - COL_SHORT[0])
+                        if dist_long < dist_short:
+                            long_val  = val
+                        else:
+                            short_val = val
 
                     if not long_val and not short_val:
                         continue
 
-                    # Parser contract
+                    # Parser contract : "06 MAR 26 EUR EUR-BUND"
                     mon = yr = product = ccy = ""
-
-                    # Format "06 MAR 26 EUR EUR-BUND"
                     mc = re.search(
                         r'\d{2}\s+([A-Z]{3})\s+(\d{2})\s+(?:([A-Z]{2,3})\s+)?(.+)',
                         last_contract
@@ -140,7 +142,6 @@ def extraire_positions(chemin_pdf):
                         ccy     = last_cc or mc.group(3) or ""
                         product = mc.group(4).strip()
                     else:
-                        # Format "MAR 26 CBT ULT TNOTE"
                         mc2 = re.search(
                             r'([A-Z]{3})\s+(\d{2})\s+(?:([A-Z]{2,3})\s+)?(.+)',
                             last_contract
@@ -167,42 +168,20 @@ def extraire_positions(chemin_pdf):
                     print(f"  ✅ {last_trade_date} | Long={long_val} | Short={short_val} | {product} {mon} {yr} {ccy}")
                     continue
 
-                # ── Ligne de données : mémoriser Trade Date + Contract + CC ──
-                # Sur la même ligne : Trade Date + Contract + CC
-                trade_date_line = ""
-                contract_parts  = []
-                cc_val          = ""
+                # Ignorer CLOSE
+                if ligne.strip().startswith("CLOSE"):
+                    continue
 
-                for w in mots:
-                    x   = w['x0']
-                    txt = w['text']
+                # ── Ligne de données : extraire par position ──
+                trade_date = get_col(ligne, *COL_TRADE)
+                contract   = get_col(ligne, *COL_CONTRACT)
+                cc         = get_col(ligne, *COL_CC)
 
-                    # Trade Date : x≈trade_x + format date
-                    if abs(x - trade_x) < TOL and re.match(r'^\d{1,2}/\d{1,2}/\d{1,2}$', txt):
-                        trade_date_line = txt
-
-                    # CC : x≈cc_x + 2 lettres majuscules
-                    elif cc_x and abs(x - cc_x) < TOL and re.match(r'^[A-Z]{2}$', txt):
-                        cc_val = txt
-
-                    # Contract : x >= contract_x, avant le prix
-                    elif x >= contract_x - TOL:
-                        if re.match(r'^\d{3,}[\.,]', txt):
-                            break
-                        # Stop au EX (ex: 27, 01, 18) — petit nombre avant le prix
-                        if re.match(r'^\d{2}$', txt) and int(txt) > 26:
-                            break
-                        contract_parts.append(txt)
-
-                # Mettre à jour seulement si on a trouvé une date sur cette ligne
-                # → Trade Date et Contract sont forcément sur la même ligne
-                if trade_date_line and contract_parts:
-                    last_trade_date = trade_date_line
-                    last_contract   = " ".join(contract_parts).strip()
-                    last_cc         = cc_val
-                elif contract_parts and not trade_date_line:
-                    # Ligne de continuation (même bloc, pas de date) → ignorer contract
-                    pass
+                # Valider trade date format MM/DD/Y
+                if re.match(r'^\d{1,2}/\d{1,2}/\d{1,2}$', trade_date) and contract:
+                    last_trade_date = trade_date
+                    last_contract   = contract
+                    last_cc         = cc
 
     print(f"\n📊 BAML - Total : {len(toutes_les_lignes)} positions")
     return toutes_les_lignes
