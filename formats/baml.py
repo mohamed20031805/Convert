@@ -64,8 +64,8 @@ def extraire_positions(chemin_pdf):
                     lignes_mots[y] = []
                 lignes_mots[y].append(w)
 
-            # Chercher entête LONG/SHORT
-            long_x = short_x = trade_x = contract_x = header_y = None
+            # Chercher entête LONG/SHORT/CC
+            long_x = short_x = trade_x = contract_x = cc_x = header_y = None
             for y in sorted(lignes_mots.keys()):
                 mots = lignes_mots[y]
                 texte_ligne = " ".join(w['text'] for w in mots)
@@ -76,8 +76,9 @@ def extraire_positions(chemin_pdf):
                         if w['text'] == "LONG":     long_x     = w['x0']
                         if w['text'] == "SHORT":    short_x    = w['x0']
                         if w['text'] == "CONTRACT": contract_x = w['x0']
+                        if w['text'] == "CC":       cc_x       = w['x0']
                     header_y = y
-                    print(f"\n✅ Page {i+1} - LONG x={long_x:.1f} SHORT x={short_x:.1f} CONTRACT x={contract_x:.1f}")
+                    print(f"\n✅ Page {i+1} - TRADE x={trade_x:.1f} LONG x={long_x:.1f} SHORT x={short_x:.1f} CONTRACT x={contract_x:.1f} CC x={cc_x}")
                     break
 
             if not long_x or not header_y:
@@ -88,6 +89,7 @@ def extraire_positions(chemin_pdf):
 
             last_contract   = ""
             last_trade_date = ""
+            last_cc         = ""
 
             for y in ys_sorted:
                 mots = lignes_mots[y]
@@ -104,20 +106,16 @@ def extraire_positions(chemin_pdf):
                 ]):
                     continue
 
-                # Mémoriser Trade Date
-                for w in mots:
-                    if abs(w['x0'] - trade_x) < TOL and re.match(r'^\d{1,2}/\d{1,2}/\d{1,2}$', w['text']):
-                        last_trade_date = w['text']
-
-                # ── Ligne TOTAL : contient N* (avec ou sans virgule) ──
-                total_match = re.search(r'\b[\d,]+\*', texte_ligne)
+                # ── Ligne TOTAL : contient N* (virgule, point acceptés ex: 861.320*) ──
+                total_match = re.search(r'\b[\d,\.]+\*', texte_ligne)
                 if total_match:
                     long_val  = ""
                     short_val = ""
 
                     for w in mots:
-                        if re.match(r'^[\d,]+\*$', w['text']):
-                            val = w['text'].replace('*', '').replace(',', '')
+                        # Accepter 27* | 1,008* | 861.320*
+                        if re.match(r'^[\d,\.]+\*$', w['text']):
+                            val = w['text'].replace('*', '').replace(',', '').replace('.', '')
                             dist_long  = abs(w['x0'] - long_x)
                             dist_short = abs(w['x0'] - short_x)
                             if dist_long < dist_short:
@@ -139,10 +137,10 @@ def extraire_positions(chemin_pdf):
                     if mc:
                         mon     = mc.group(1)
                         yr      = mc.group(2)
-                        ccy     = mc.group(3) or ""
+                        ccy     = last_cc or mc.group(3) or ""
                         product = mc.group(4).strip()
                     else:
-                        # Format "MAR 26 CBT ULT TNOTE" ou "MAR 26 EURO-BTP"
+                        # Format "MAR 26 CBT ULT TNOTE"
                         mc2 = re.search(
                             r'([A-Z]{3})\s+(\d{2})\s+(?:([A-Z]{2,3})\s+)?(.+)',
                             last_contract
@@ -150,10 +148,11 @@ def extraire_positions(chemin_pdf):
                         if mc2:
                             mon     = mc2.group(1)
                             yr      = mc2.group(2)
-                            ccy     = mc2.group(3) or ""
+                            ccy     = last_cc or mc2.group(3) or ""
                             product = mc2.group(4).strip()
                         else:
                             product = last_contract
+                            ccy     = last_cc
 
                     ligne_data = {
                         "Trade Date": last_trade_date,
@@ -168,20 +167,42 @@ def extraire_positions(chemin_pdf):
                     print(f"  ✅ {last_trade_date} | Long={long_val} | Short={short_val} | {product} {mon} {yr} {ccy}")
                     continue
 
-                # ── Ligne de données : mémoriser contract ──
-                contract_parts = []
+                # ── Ligne de données : mémoriser Trade Date + Contract + CC ──
+                # Sur la même ligne : Trade Date + Contract + CC
+                trade_date_line = ""
+                contract_parts  = []
+                cc_val          = ""
+
                 for w in mots:
-                    if w['x0'] >= contract_x - TOL:
-                        txt = w['text']
-                        # Arrêter au EX (nombre 2 chiffres ex: 27) ou prix décimal
+                    x   = w['x0']
+                    txt = w['text']
+
+                    # Trade Date : x≈trade_x + format date
+                    if abs(x - trade_x) < TOL and re.match(r'^\d{1,2}/\d{1,2}/\d{1,2}$', txt):
+                        trade_date_line = txt
+
+                    # CC : x≈cc_x + 2 lettres majuscules
+                    elif cc_x and abs(x - cc_x) < TOL and re.match(r'^[A-Z]{2}$', txt):
+                        cc_val = txt
+
+                    # Contract : x >= contract_x, avant le prix
+                    elif x >= contract_x - TOL:
                         if re.match(r'^\d{3,}[\.,]', txt):
                             break
+                        # Stop au EX (ex: 27, 01, 18) — petit nombre avant le prix
                         if re.match(r'^\d{2}$', txt) and int(txt) > 26:
                             break
                         contract_parts.append(txt)
 
-                if contract_parts:
-                    last_contract = " ".join(contract_parts).strip()
+                # Mettre à jour seulement si on a trouvé une date sur cette ligne
+                # → Trade Date et Contract sont forcément sur la même ligne
+                if trade_date_line and contract_parts:
+                    last_trade_date = trade_date_line
+                    last_contract   = " ".join(contract_parts).strip()
+                    last_cc         = cc_val
+                elif contract_parts and not trade_date_line:
+                    # Ligne de continuation (même bloc, pas de date) → ignorer contract
+                    pass
 
     print(f"\n📊 BAML - Total : {len(toutes_les_lignes)} positions")
     return toutes_les_lignes
