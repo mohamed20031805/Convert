@@ -1,134 +1,19 @@
-def extraire_positions(chemin_pdf):
-    toutes_les_lignes = []
-
-    with pdfplumber.open(chemin_pdf) as pdf:
-        for i, page in enumerate(pdf.pages):
-            texte = page.extract_text()
-            if not texte:
-                continue
-
-            lignes = texte.split('\n')
-
-            # Chercher header
-            header_idx = None
-            for j, ligne in enumerate(lignes):
-                if ("LONG" in ligne and "SHORT" in ligne
-                        and "TRADE" in ligne and "CONTRACT" in ligne):
-                    header_idx = j
-                    print(f"\n✅ Page {i+1}")
-                    break
-
-            if header_idx is None:
-                continue
-
-            last_contract   = ""
-            last_trade_date = ""
-            last_cc         = ""
-            pending_total   = None  # {"val": "27", "line": "27* CLOSE..."}
-
-            data_lignes = lignes[header_idx + 2:]
-
-            for idx, ligne in enumerate(data_lignes):
-                stripped = ligne.strip()
-                if not stripped:
-                    continue
-
-                # ── AVG LONG / AVG SHORT → résoudre Long ou Short du total pending ──
-                if stripped.startswith("AVG LONG:") or stripped.startswith("AVG SHORT:"):
-                    if pending_total:
-                        val = pending_total["val"]
-                        if "LONG" in stripped:
-                            long_val  = val
-                            short_val = ""
-                        else:
-                            long_val  = ""
-                            short_val = val
-
-                        ligne_data = {
-                            "Trade Date": last_trade_date,
-                            "Long":       long_val,
-                            "Short":      short_val,
-                            "Product":    pending_total["product"],
-                            "Mon":        pending_total["mon"],
-                            "Yr":         pending_total["yr"],
-                            "CCY":        pending_total["ccy"],
-                        }
-                        toutes_les_lignes.append(ligne_data)
-                        print(f"  ✅ {last_trade_date} | L={long_val} | S={short_val} | {pending_total['product']} {pending_total['mon']} {pending_total['yr']} {pending_total['ccy']}")
-                        pending_total = None
-                    continue
-
-                # ── Ligne TOTAL : N* CLOSE ──
-                if re.match(r'^[\d,]+\*\s+CLOSE', stripped):
-                    total_m = re.match(r'^([\d,]+)\*', stripped)
-                    if not total_m:
-                        continue
-                    val = total_m.group(1).replace(',', '')
-
-                    # Parser contract
-                    mon = yr = product = ccy = ""
-                    # Format "06 MAR 26 EUR EUR-BUND"
-                    mc = re.search(
-                        r'\d{2}\s+([A-Z]{3})\s+(\d{2})\s+(?:([A-Z]{2,3})\s+)?(.+)',
-                        last_contract
-                    )
-                    if mc:
-                        mon     = mc.group(1)
-                        yr      = mc.group(2)
-                        ccy     = last_cc or mc.group(3) or ""
-                        product = mc.group(4).strip()
-                    else:
-                        # Format "MAR 26 CBT ULT TNOTE"
-                        mc2 = re.search(
-                            r'([A-Z]{3})\s+(\d{2})\s+(?:\w+\s+)?(.+)',
-                            last_contract
-                        )
-                        if mc2:
-                            mon     = mc2.group(1)
-                            yr      = mc2.group(2)
-                            ccy     = last_cc
-                            product = mc2.group(3).strip()
-                        else:
-                            product = last_contract
-                            ccy     = last_cc
-
-                    pending_total = {
-                        "val":     val,
-                        "product": product,
-                        "mon":     mon,
-                        "yr":      yr,
-                        "ccy":     ccy,
-                    }
-                    continue
-
-                # Ignorer autres lignes système
-                if any(x in ligne for x in [
-                    "PAGE", "MERRILL", "FUTURES", "KING", "LONDON",
-                    "MORGAN", "FUND", "FCH", "CABOT", "UNITED", "KINGDOM",
-                    "CONFIRMATION", "ACCEPTED", "PURCHASE", "SALE",
-                    "COMMISSION", "NET PROFIT", "GROSS", "CLEARING",
-                    "BROKERAGE", "OPEN TRADE", "* REG", "* SEC",
-                    "OPTION", "CONVERTED", "CLOSE", "------"
-                ]):
-                    continue
-
-                # ── Ligne de données : date + quantité + contract + CC ──
-                # Format: "12/05/5 F4 3 06 MAR 26 EUR EUR-BUND 27 128.2000000 EU 90.00DR"
-                m = re.match(
-                    r'^(\d{1,2}/\d{1,2}/\d{1,2})\s+'  # date
-                    r'\w+\s+'                            # SETTL
-                    r'\w+\s+'                            # AT
-                    r'(\d+)\s+'                          # quantité (Long ou Short)
-                    r'(.+?)\s+'                          # contract description
-                    r'\d+\s+'                            # EX
-                    r'[\d\.\-]+\s+'                      # PRICE
-                    r'([A-Z]{2})\s*',                   # CC
-                    stripped
-                )
-                if m:
-                    last_trade_date = m.group(1)
-                    last_contract   = m.group(3).strip()
-                    last_cc         = m.group(4).strip()
-
-    print(f"\n📊 BAML - Total : {len(toutes_les_lignes)} positions")
-    return toutes_les_lignes
+python -c "
+import pdfplumber
+p = r'T:\Dallas\CSS-BOC\CTL\REC\Réconciliation dérivés listés\FUND CHANNEL\2026\BAML\MSIM_SG_EOD Daily Statement.pdf'
+with pdfplumber.open(p) as pdf:
+    for i, page in enumerate(pdf.pages):
+        texte = page.extract_text() or ''
+        lignes = texte.split('\n')
+        trouve = False
+        for ligne in lignes:
+            if 'LONG' in ligne and 'SHORT' in ligne and 'TRADE' in ligne and 'CONTRACT' in ligne:
+                trouve = True
+                break
+        print(f'PAGE {i+1} : {\"✅ DETECTEE\" if trouve else \"❌ NON DETECTEE\"}')
+        if not trouve and texte:
+            # Afficher les 3 premieres lignes non vides
+            for ligne in lignes[:5]:
+                if ligne.strip():
+                    print(f'  -> {repr(ligne)}')
+"
