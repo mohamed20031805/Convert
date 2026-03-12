@@ -4,20 +4,8 @@ p = r'T:\Dallas\CSS-BOC\CTL\REC\Réconciliation dérivés listés\FUND CHANNEL\2
 with pdfplumber.open(p) as pdf:
     page = pdf.pages[1]
     texte = page.extract_text()
-    lignes = texte.split('\n')
-    for ligne in lignes:
-        if 'LONG' in ligne and 'SHORT' in ligne and 'CONTRACT' in ligne:
-            print('HEADER:')
-            print(ligne)
-            print('0123456789' * 12)
-            for i in range(0, len(ligne), 10):
-                print(str(i).ljust(10), end='')
-            print()
-        if '12/05' in ligne or '27*' in ligne:
-            print('DATA:')
-            print(ligne)
-            print('0123456789' * 12)
-            for i in range(0, len(ligne), 10):
-                print(str(i).ljust(10), end='')
-            print()
+    for ligne in texte.split('\n'):
+        if re.search(r'\d+\*', ligne):
+            pos = ligne.index('*')
+            print(f'pos_etoile={pos} | |{ligne}|')
 "
