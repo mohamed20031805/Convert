@@ -1,7 +1,9 @@
 python -c "
-from formats import baml
-lignes = baml.extraire_positions(r'T:\Dallas\CSS-BOC\CTL\REC\Réconciliation dérivés listés\FUND CHANNEL\2026\BAML\MSIM_SG_EOD Daily Statement.pdf')
-from formats.baml import formater_output
-df = formater_output(lignes)
-print(df.to_string())
-"
+import pdfplumber
+p = r'T:\Dallas\CSS-BOC\CTL\REC\Réconciliation dérivés listés\FUND CHANNEL\2026\BAML\MSIM_SG_EOD Daily Statement.pdf'
+with pdfplumber.open(p) as pdf:
+    page = pdf.pages[1]
+    texte = page.extract_text()
+    for ligne in texte.split('\n'):
+        print(repr(ligne))
+" | head -40
