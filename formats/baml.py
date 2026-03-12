@@ -29,11 +29,10 @@ def extraire_entete(chemin_pdf, template_json=None):
                 client_parts = []
                 for j in range(i, min(i + 4, len(lignes))):
                     l = lignes[j].strip()
-                    if l and not any(x in l for x in ["CABOT", "LONDON", "UNITED", "PAGE"]):
+                    if l and not any(x in l for x in ["CABOT","LONDON","UNITED","PAGE"]):
                         client_parts.append(l)
                 infos["Client"] = " ".join(client_parts)
                 break
-
     if template_json:
         import json, os
         if os.path.exists(template_json):
@@ -42,24 +41,17 @@ def extraire_entete(chemin_pdf, template_json=None):
             for k, v in t.items():
                 if not infos.get(k):
                     infos[k] = v
-
     print(f"✅ Entête BAML : {infos}")
     return infos
 
 
-# Positions fixes des colonnes (basées sur les tirets)
-COL_TRADE    = (0,  6)
-COL_LONG     = (15, 20)
-COL_SHORT    = (20, 26)
-COL_CONTRACT = (26, 47)
-COL_CC       = (56, 58)
-
-
-def get_col(ligne, start, end):
-    """Extraire une colonne par position de caractères"""
-    if len(ligne) < start:
-        return ""
-    return ligne[start:end].strip()
+def get_col_positions(header_ligne):
+    cols = {}
+    for col in ["TRADE", "LONG", "SHORT", "CONTRACT", "CC"]:
+        idx = header_ligne.find(col)
+        if idx >= 0:
+            cols[col] = idx
+    return cols
 
 
 def extraire_positions(chemin_pdf):
@@ -73,64 +65,64 @@ def extraire_positions(chemin_pdf):
 
             lignes = texte.split('\n')
 
-            # Chercher la ligne d'entête TRADE LONG SHORT CONTRACT
+            # Chercher header
             header_idx = None
+            cols = {}
             for j, ligne in enumerate(lignes):
                 if ("LONG" in ligne and "SHORT" in ligne
-                        and "TRADE" in ligne and "CONTRACT" in ligne
-                        and "DESCRIPTION" in ligne):
+                        and "TRADE" in ligne and "CONTRACT" in ligne):
+                    cols = get_col_positions(ligne)
                     header_idx = j
-                    print(f"\n✅ Page {i+1} - entête ligne {j}")
+                    print(f"\n✅ Page {i+1} - cols={cols}")
                     break
 
-            if header_idx is None:
+            if not cols or header_idx is None:
                 continue
+
+            p_trade    = cols.get("TRADE",    0)
+            p_long     = cols.get("LONG",     15)
+            p_short    = cols.get("SHORT",    20)
+            p_contract = cols.get("CONTRACT", 26)
+            p_cc       = cols.get("CC",       56)
+            p_contract_end = p_cc - 3
 
             last_contract   = ""
             last_trade_date = ""
             last_cc         = ""
 
-            for ligne in lignes[header_idx + 2:]:  # +2 pour sauter les tirets
+            for ligne in lignes[header_idx + 2:]:
 
-                # Ignorer lignes système
                 if any(x in ligne for x in [
                     "AVG ", "PAGE", "MERRILL", "FUTURES", "KING",
                     "LONDON", "MORGAN", "FUND", "FCH", "CABOT", "UNITED",
                     "KINGDOM", "CONFIRMATION", "ACCEPTED", "PURCHASE",
-                    "SALE", "SETTL", "DEBIT", "COMMISSION",
-                    "NET PROFIT", "GROSS", "CLEARING", "BROKERAGE",
-                    "OPEN TRADE", "OPTION", "TRADE SETTL"
+                    "SALE", "SETTL AT", "COMMISSION", "NET PROFIT",
+                    "GROSS", "CLEARING", "BROKERAGE", "OPEN TRADE",
+                    "* REG", "* SEC", "OPTION PREMIUM"
                 ]):
                     continue
 
-                # ── Ligne TOTAL : commence par N* ex "27* CLOSE" ──
-                total_match = re.match(r'^([\d,\.]+)\*', ligne.strip())
-                if total_match:
-                    val = total_match.group(1).replace(',', '').replace('.', '')
+                stripped = ligne.strip()
+                if not stripped:
+                    continue
 
-                    # Déterminer Long ou Short selon position du N*
-                    # Le N* est dans la colonne LONG (pos 15-20) ou SHORT (pos 20-26)
-                    pos_etoile = ligne.index('*')
+                # ── Ligne TOTAL : N* ──
+                total_m = re.match(r'^([\d,]+)\*', stripped)
+                if total_m:
+                    val = total_m.group(1).replace(',', '')
+
+                    # Position du * dans la ligne originale
+                    pos_star = len(ligne) - len(ligne.lstrip()) + len(total_m.group(1))
                     long_val  = ""
                     short_val = ""
-
-                    if COL_LONG[0] <= pos_etoile <= COL_LONG[1] + 5:
+                    dist_long  = abs(pos_star - (p_long  + len(total_m.group(1))))
+                    dist_short = abs(pos_star - (p_short + len(total_m.group(1))))
+                    if dist_long <= dist_short:
                         long_val  = val
-                    elif COL_SHORT[0] <= pos_etoile <= COL_SHORT[1] + 5:
-                        short_val = val
                     else:
-                        # Par défaut chercher lequel est le plus proche
-                        dist_long  = abs(pos_etoile - COL_LONG[0])
-                        dist_short = abs(pos_etoile - COL_SHORT[0])
-                        if dist_long < dist_short:
-                            long_val  = val
-                        else:
-                            short_val = val
+                        short_val = val
 
-                    if not long_val and not short_val:
-                        continue
-
-                    # Parser contract : "06 MAR 26 EUR EUR-BUND"
+                    # Parser contract
                     mon = yr = product = ccy = ""
                     mc = re.search(
                         r'\d{2}\s+([A-Z]{3})\s+(\d{2})\s+(?:([A-Z]{2,3})\s+)?(.+)',
@@ -155,6 +147,9 @@ def extraire_positions(chemin_pdf):
                             product = last_contract
                             ccy     = last_cc
 
+                    if not product:
+                        continue
+
                     ligne_data = {
                         "Trade Date": last_trade_date,
                         "Long":       long_val,
@@ -165,23 +160,31 @@ def extraire_positions(chemin_pdf):
                         "CCY":        ccy,
                     }
                     toutes_les_lignes.append(ligne_data)
-                    print(f"  ✅ {last_trade_date} | Long={long_val} | Short={short_val} | {product} {mon} {yr} {ccy}")
+                    print(f"  ✅ {last_trade_date} | L={long_val} | S={short_val} | {product} {mon} {yr} {ccy}")
                     continue
 
                 # Ignorer CLOSE
-                if ligne.strip().startswith("CLOSE"):
+                if stripped.startswith("CLOSE"):
                     continue
 
-                # ── Ligne de données : extraire par position ──
-                trade_date = get_col(ligne, *COL_TRADE)
-                contract   = get_col(ligne, *COL_CONTRACT)
-                cc         = get_col(ligne, *COL_CC)
+                # ── Ligne de données ──
+                if len(ligne) < p_contract:
+                    continue
 
-                # Valider trade date format MM/DD/Y
+                trade_date = ligne[p_trade : p_trade + 8].strip()
+                contract   = ligne[p_contract : p_contract_end].strip() if len(ligne) > p_contract else ""
+                cc         = ligne[p_cc : p_cc + 3].strip() if len(ligne) > p_cc else ""
+
+                # Ligne avec date + contract
                 if re.match(r'^\d{1,2}/\d{1,2}/\d{1,2}$', trade_date) and contract:
                     last_trade_date = trade_date
                     last_contract   = contract
-                    last_cc         = cc
+                    last_cc         = cc if re.match(r'^[A-Z]{2}$', cc) else last_cc
+                    continue
+
+                # Ligne de continuation (contract sur 2 lignes)
+                if not trade_date and contract and len(stripped) > 3:
+                    last_contract = (last_contract + " " + contract).strip()
 
     print(f"\n📊 BAML - Total : {len(toutes_les_lignes)} positions")
     return toutes_les_lignes
