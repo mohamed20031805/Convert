@@ -2,15 +2,9 @@ python -c "
 import pdfplumber
 p = r'T:\Dallas\CSS-BOC\CTL\REC\Réconciliation dérivés listés\FUND CHANNEL\2026\BAML\MSIM_SG_EOD Daily Statement.pdf'
 with pdfplumber.open(p) as pdf:
-    for i, page in enumerate(pdf.pages[13:17]):
-        texte = page.extract_text() or ''
-        print(f'--- PAGE {i+14} ---')
-        for ligne in texte.split('\n'):
-            if ligne.strip():
-                print(repr(ligne))
-        print()
-"
-
-Est-ce que les pages 14-17 ont une ligne header TRADE SETTL AT LONG SHORT CONTRACT... ?
-Quel est le format des lignes de données sur ces pages — est-ce pareil que page 2 ex: 12/05/5 F4 3 06 MAR 26 EUR EUR-BUND 27 128.2 EU 90.00DR ?
-Est-ce que le contract change sur ces pages ou c'est toujours MAR 26 FOAT ?
+    page = pdf.pages[13]  # page 14
+    texte = page.extract_text() or ''
+    for ligne in texte.split('\n'):
+        if ligne.strip() and any(x in ligne for x in ['CDS', 'AVG', 'CLOSE', '*']):
+            print(repr(ligne))
+" | head -20
