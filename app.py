@@ -1,16 +1,19 @@
 import streamlit as st
 import tempfile
 import os
+import re
 import pdfplumber
 from exporter import exporter_excel
-from formats import morgan, triton
+from formats import morgan, triton, baml
 from formats_client.morgan_client import charger_client, agréger_client, joindre, extraire_code_client
 from formats_client.triton_client import charger_client as charger_client_triton
 from formats_client.triton_client import agréger_client as agréger_client_triton
 from formats_client.triton_client import joindre as joindre_triton
+from formats_client.baml_client import charger_client as charger_client_baml
+from formats_client.baml_client import comparer as comparer_baml
 
 # ── Formats disponibles ──
-FORMATS = [triton, morgan]
+FORMATS = [triton, baml, morgan]
 TEMPLATES = {
     "morgan": "templates/morgan_stanley.json",
     "triton": "templates/triton.json",
@@ -138,11 +141,13 @@ if st.session_state.extraction_done:
             )
 
     # ══════════════════════════════════════════
-    # 4. Comparaison Doc Client (Morgan uniquement)
+    # 4. Comparaison Doc Client
     # ══════════════════════════════════════════
-if nom_format == "morgan":
-        st.divider()
-        st.subheader("4️⃣  Comparer avec le Doc Client")
+    st.divider()
+
+    # ── Morgan ──
+    if nom_format == "morgan":
+        st.subheader("4️⃣  Comparer avec le Doc Client Morgan")
         client_file = st.file_uploader(
             "Chargez le fichier Excel client Morgan",
             type=["xlsx", "xls"],
@@ -156,8 +161,6 @@ if nom_format == "morgan":
                 df_client_raw = charger_client(tmp_client_path)
                 code_client   = extraire_code_client(df_client_raw)
 
-                # ── Extraire le code du PDF (ex: 3757 depuis "STRATEGY - 3757") ──
-                import re
                 code_pdf = ""
                 client_str = entete.get("Client", "")
                 m = re.search(r'-\s*(\d+)', client_str)
@@ -166,11 +169,10 @@ if nom_format == "morgan":
 
                 st.info(f"🔑 Code client détecté : **{code_client}** | Filtre PDF : **{code_pdf}**")
 
-                # ── Filtrer par code PDF ──
-                df_client = agréger_client(df_client_raw, code_pdf=code_pdf)
-
+                df_client  = agréger_client(df_client_raw, code_pdf=code_pdf)
                 df_compare = joindre(output_df, df_client)
-                st.subheader("📊 Comparaison PDF ↔ Client")
+
+                st.subheader("📊 Comparaison PDF ↔ Client Morgan")
                 nb_ok         = len(df_compare[df_compare["Status"] == "✅ OK"])
                 nb_ecart      = len(df_compare[df_compare["Status"].str.contains("⚠️", na=False)])
                 nb_non_trouve = len(df_compare[df_compare["Status"] == "❌ NON TROUVÉ"])
@@ -178,60 +180,56 @@ if nom_format == "morgan":
                 col1.metric("✅ OK",          nb_ok)
                 col2.metric("⚠️ Écarts",      nb_ecart)
                 col3.metric("❌ Non trouvés", nb_non_trouve)
+
                 def colorer_status(val):
-                    if val == "✅ OK":          return "background-color: #d4edda; color: #155724"
-                    if "⚠️" in str(val):        return "background-color: #fff3cd; color: #856404"
-                    if "❌" in str(val):        return "background-color: #f8d7da; color: #721c24"
+                    if val == "✅ OK":        return "background-color: #d4edda; color: #155724"
+                    if "⚠️" in str(val):      return "background-color: #fff3cd; color: #856404"
+                    if "❌" in str(val):      return "background-color: #f8d7da; color: #721c24"
                     return ""
+
                 st.dataframe(
                     df_compare.style.applymap(colorer_status, subset=["Status"]),
                     use_container_width=True,
                     hide_index=True
                 )
             except Exception as e:
-                st.error(f"❌ Erreur fichier client : {e}")
+                st.error(f"❌ Erreur fichier client Morgan : {e}")
                 import traceback
                 st.code(traceback.format_exc())
             finally:
                 if os.path.exists(tmp_client_path):
                     os.remove(tmp_client_path)
-    # ── Section Doc Client Triton ──
-    elif nom_format == "triton":
-        st.divider()
-        st.subheader("4️⃣  Comparer avec le Doc Client Triton")
 
+    # ── Triton ──
+    elif nom_format == "triton":
+        st.subheader("4️⃣  Comparer avec le Doc Client Triton")
         client_file = st.file_uploader(
             "Chargez le fichier Excel client Triton",
             type=["xlsx", "xls"],
             key="client_upload_triton"
         )
-
         if client_file is not None:
             with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp_client:
                 tmp_client.write(client_file.read())
                 tmp_client_path = tmp_client.name
-
             try:
                 df_client_raw = charger_client_triton(tmp_client_path)
                 df_client     = agréger_client_triton(df_client_raw)
-
-                df_compare = joindre_triton(output_df, df_client)
+                df_compare    = joindre_triton(output_df, df_client)
 
                 st.subheader("📊 Comparaison PDF ↔ Client Triton")
-
                 nb_ok         = len(df_compare[df_compare["Status"] == "✅ OK"])
                 nb_ecart      = len(df_compare[df_compare["Status"].str.contains("⚠️", na=False)])
                 nb_non_trouve = len(df_compare[df_compare["Status"] == "❌ NON TROUVÉ"])
-
                 col1, col2, col3 = st.columns(3)
                 col1.metric("✅ OK",          nb_ok)
                 col2.metric("⚠️ Écarts",      nb_ecart)
                 col3.metric("❌ Non trouvés", nb_non_trouve)
 
                 def colorer_status(val):
-                    if val == "✅ OK":     return "background-color: #d4edda; color: #155724"
-                    if "⚠️" in str(val):  return "background-color: #fff3cd; color: #856404"
-                    if "❌" in str(val):  return "background-color: #f8d7da; color: #721c24"
+                    if val == "✅ OK":        return "background-color: #d4edda; color: #155724"
+                    if "⚠️" in str(val):      return "background-color: #fff3cd; color: #856404"
+                    if "❌" in str(val):      return "background-color: #f8d7da; color: #721c24"
                     return ""
 
                 st.dataframe(
@@ -239,12 +237,54 @@ if nom_format == "morgan":
                     use_container_width=True,
                     hide_index=True
                 )
-
             except Exception as e:
                 st.error(f"❌ Erreur fichier client Triton : {e}")
                 import traceback
                 st.code(traceback.format_exc())
             finally:
                 if os.path.exists(tmp_client_path):
+                    os.remove(tmp_client_path)
 
+    # ── BAML ──
+    elif nom_format == "baml":
+        st.subheader("4️⃣  Comparer avec le Doc Client BAML")
+        client_file = st.file_uploader(
+            "Chargez le fichier Excel client BAML",
+            type=["xlsx", "xls"],
+            key="client_upload_baml"
+        )
+        if client_file is not None:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp_client:
+                tmp_client.write(client_file.read())
+                tmp_client_path = tmp_client.name
+            try:
+                df_client_raw = charger_client_baml(tmp_client_path)
+                df_compare    = comparer_baml(output_df, df_client_raw)
+
+                st.subheader("📊 Comparaison PDF ↔ Client BAML")
+                nb_ok         = len(df_compare[df_compare["Status"] == "✅ OK"])
+                nb_ecart      = len(df_compare[df_compare["Status"].str.contains("⚠️", na=False)])
+                nb_non_trouve = len(df_compare[df_compare["Status"] == "❌ NON TROUVÉ"])
+                col1, col2, col3 = st.columns(3)
+                col1.metric("✅ OK",          nb_ok)
+                col2.metric("⚠️ Écarts",      nb_ecart)
+                col3.metric("❌ Non trouvés", nb_non_trouve)
+
+                def colorer_status(val):
+                    if val == "✅ OK":        return "background-color: #d4edda; color: #155724"
+                    if "⚠️" in str(val):      return "background-color: #fff3cd; color: #856404"
+                    if "❌" in str(val):      return "background-color: #f8d7da; color: #721c24"
+                    return ""
+
+                st.dataframe(
+                    df_compare.style.applymap(colorer_status, subset=["Status"]),
+                    use_container_width=True,
+                    hide_index=True
+                )
+            except Exception as e:
+                st.error(f"❌ Erreur fichier client BAML : {e}")
+                import traceback
+                st.code(traceback.format_exc())
+            finally:
+                if os.path.exists(tmp_client_path):
                     os.remove(tmp_client_path)
