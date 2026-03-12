@@ -29,8 +29,14 @@ def charger_client(chemin_excel):
     """Charger fichier client BAML — header ligne 10"""
     df = pd.read_excel(chemin_excel, header=9)  # ligne 10 = index 9
     df.columns = [str(c).strip() for c in df.columns]
+
     # Garder seulement les lignes avec Security Description
     df = df[df["Security Description"].notna()].copy()
+
+    # ── Filtrer uniquement FUTURES ──
+    if "Asset Description" in df.columns:
+        df = df[df["Asset Description"].astype(str).str.upper().str.contains("FUTURES", na=False)].copy()
+
     return df
 
 
