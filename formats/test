@@ -4,13 +4,18 @@ p = r'T:\Dallas\CSS-BOC\CTL\REC\Réconciliation dérivés listés\FUND CHANNEL\2
 with pdfplumber.open(p) as pdf:
     page = pdf.pages[1]
     texte = page.extract_text()
-    for j, ligne in enumerate(texte.split('\n')):
-        if '----' in ligne or 'TRADE' in ligne or '12/05' in ligne or '27*' in ligne or '06 MAR' in ligne:
-            print(f'[{j:3}] |{ligne}|')
-            if '----' in ligne:
-                print(f'      len={len(ligne)}')
-                # Afficher position de chaque caractere
-                for idx, c in enumerate(ligne):
-                    if c != ' ':
-                        print(f'      pos={idx} char={c}')
+    lignes = texte.split('\n')
+    for j, ligne in enumerate(lignes):
+        if 'TRADE' in ligne and 'LONG' in ligne and 'SHORT' in ligne:
+            print(f'HEADER: |{ligne}|')
+            # Position de chaque colonne
+            for col in ['TRADE','SETTL','AT','LONG','SHORT','CONTRACT','EX','PRICE','CC','DEBIT']:
+                idx = ligne.find(col)
+                if idx >= 0:
+                    print(f'  {col:12} -> pos={idx}')
+        if '----' in ligne:
+            print(f'DASH:   |{ligne}|')
+            print(f'  len={len(ligne)}')
+        if '12/05' in ligne or '12/12' in ligne or '27*' in ligne:
+            print(f'DATA:   |{ligne}|')
 "
