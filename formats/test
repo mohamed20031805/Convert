@@ -1,4 +1,16 @@
 python -c "
-from formats import baml
-lignes = baml.extraire_positions(r'T:\Dallas\CSS-BOC\CTL\REC\Réconciliation dérivés listés\FUND CHANNEL\2026\BAML\MSIM_SG_EOD Daily Statement .pdf')
-" 
+import pdfplumber
+p = r'T:\Dallas\CSS-BOC\CTL\REC\Réconciliation dérivés listés\FUND CHANNEL\2026\BAML\MSIM_SG_EOD Daily Statement.pdf'
+with pdfplumber.open(p) as pdf:
+    page = pdf.pages[1]
+    texte = page.extract_text()
+    for j, ligne in enumerate(texte.split('\n')):
+        if '----' in ligne or 'TRADE' in ligne or '12/05' in ligne or '27*' in ligne or '06 MAR' in ligne:
+            print(f'[{j:3}] |{ligne}|')
+            if '----' in ligne:
+                print(f'      len={len(ligne)}')
+                # Afficher position de chaque caractere
+                for idx, c in enumerate(ligne):
+                    if c != ' ':
+                        print(f'      pos={idx} char={c}')
+"
