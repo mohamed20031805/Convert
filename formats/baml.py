@@ -45,6 +45,27 @@ def extraire_entete(chemin_pdf, template_json=None):
     return infos
 
 
+def parser_product(last_contract, mon, yr):
+    """
+    Transformer le contract brut en format "PRODUCT MON YR"
+    ex: "06 MAR 26 EUR EUR-BUND" → "EUR-BUND MAR 26"
+    ex: "06 MAR 26 EUR-BTP"      → "EUR-BTP MAR 26"
+    ex: "MAR 26 CBT ULT TNOTE"   → "ULT TNOTE MAR 26"
+    ex: "CDS JUN 30 CDXEMS43V1"  → "CDS JUN 30 CDXEMS43V1" (inchangé)
+    """
+    mc = re.search(
+        r'(?:\d{2}\s+)?'        # optionnel "06 "
+        r'[A-Z]{3}\s+\d{2}\s+' # "MAR 26 "
+        r'(?:[A-Z]{2,3}\s+)?'  # optionnel "EUR "
+        r'(.+)',                # ← nom produit
+        last_contract
+    )
+    if mc:
+        product_name = mc.group(1).strip()
+        return f"{product_name} {mon} {yr}"
+    return last_contract
+
+
 def extraire_positions(chemin_pdf):
     toutes_les_lignes = []
 
@@ -62,7 +83,7 @@ def extraire_positions(chemin_pdf):
 
             lignes = texte.split('\n')
 
-            # Chercher header sur cette page
+            # Chercher header
             header_idx = None
             for j, ligne in enumerate(lignes):
                 if ("LONG" in ligne and "SHORT" in ligne
@@ -100,11 +121,11 @@ def extraire_positions(chemin_pdf):
                             "Mon":        pending_total["mon"],
                             "Yr":         pending_total["yr"],
                             "CCY":        pending_total["ccy"],
+                            "CC":         pending_total["ccy"],
                         })
                         print(f"  ✅ {last_trade_date} | L={long_val} | S={short_val} | {pending_total['product']}")
                         pending_total = None
-                    # Reset contract après chaque bloc
-                    last_contract = ""
+                    last_contract = ""  # Reset après bloc
                     continue
 
                 # ── Ligne TOTAL : N* ──
@@ -120,19 +141,24 @@ def extraire_positions(chemin_pdf):
 
                     val = total_m.group(1).replace(',', '').replace('.', '')
 
+                    # Mon + Yr depuis contract brut
                     mon = yr = ""
                     mc = re.search(r'([A-Z]{3})\s+(\d{2})\b', last_contract)
                     if mc:
                         mon = mc.group(1)
                         yr  = mc.group(2)
-                    product = last_contract
+
+                    product = parser_product(last_contract, mon, yr)
                     ccy     = last_cc
 
-                    # Cas 1 : N* CLOSE sans EX → attendre AVG
+                    # Cas 1 : N* CLOSE sans EX → attendre AVG LONG/SHORT
                     if "CLOSE" in stripped and not re.search(r'EX[-\s]', stripped):
                         pending_total = {
-                            "val": val, "product": product,
-                            "mon": mon, "yr": yr, "ccy": ccy,
+                            "val":     val,
+                            "product": product,
+                            "mon":     mon,
+                            "yr":      yr,
+                            "ccy":     ccy,
                         }
 
                     # Cas 2 : N* EX-... CLOSE → Long par défaut + reset
@@ -145,6 +171,7 @@ def extraire_positions(chemin_pdf):
                             "Mon":        mon,
                             "Yr":         yr,
                             "CCY":        ccy,
+                            "CC":         ccy,
                         })
                         print(f"  ✅ {last_trade_date} | L={val} | S= | {product} {mon} {yr} {ccy}")
                         last_contract = ""  # Reset après bloc
@@ -166,17 +193,17 @@ def extraire_positions(chemin_pdf):
                 ]):
                     continue
 
-                # ── Ligne de données futures ──
-                # Format: "12/05/5 F4 3 06 MAR 26 EUR EUR-BUND 27 128.2 EU 90.00DR"
+                # ── Ligne de données FUTURES ──
+                # "12/05/5 F4 3 06 MAR 26 EUR EUR-BUND 27 128.2 EU 90.00DR"
                 m = re.match(
-                    r'^(\d{1,2}/\d{1,2}/\d{1,2})\s+'  # date
-                    r'\w+\s+'                            # SETTL
-                    r'\w+\s+'                            # AT
-                    r'[\d,]+\s+'                         # quantité
-                    r'(.+?)\s+'                          # contract TEL QUEL
-                    r'\d+\s+'                            # EX (2 chiffres)
-                    r'[\d\.\-]+\s+'                      # PRICE
-                    r'([A-Z]{2})\b',                    # CC
+                    r'^(\d{1,2}/\d{1,2}/\d{1,2})\s+'
+                    r'\w+\s+'
+                    r'\w+\s+'
+                    r'[\d,]+\s+'
+                    r'(.+?)\s+'
+                    r'\d+\s+'
+                    r'[\d\.\-]+\s+'
+                    r'([A-Z]{2})\b',
                     stripped
                 )
                 if m:
@@ -186,13 +213,13 @@ def extraire_positions(chemin_pdf):
                     continue
 
                 # ── Ligne de données CDS ──
-                # Format: "9/29/5 Q1 28,000 CDS JUN 30 CDXEMS43V1 100 9L US 145,755.56"
+                # "9/29/5 Q1 28,000 CDS JUN 30 CDXEMS43V1 100 9L US 145,755.56"
                 m_cds = re.match(
-                    r'^(\d{1,2}/\d{1,2}/\d{1,2})\s+'  # date
-                    r'\w+\s+'                            # SETTL
-                    r'[\d,]+\s+'                         # quantité
-                    r'(.+?)\s+'                          # contract TEL QUEL
-                    r'(US|EU)\s+',                      # CC
+                    r'^(\d{1,2}/\d{1,2}/\d{1,2})\s+'
+                    r'\w+\s+'
+                    r'[\d,]+\s+'
+                    r'(.+?)\s+'
+                    r'(US|EU)\s+',
                     stripped
                 )
                 if m_cds:
@@ -205,7 +232,6 @@ def extraire_positions(chemin_pdf):
 
 
 def formater_output(lignes):
-    """Pas de groupby — retourner lignes brutes"""
     df = pd.DataFrame(lignes)
     if df.empty:
         return df
@@ -213,4 +239,4 @@ def formater_output(lignes):
     df["Short"] = pd.to_numeric(df["Short"], errors="coerce").fillna(0).astype(int)
     df["Long"]  = df["Long"].replace(0,  "")
     df["Short"] = df["Short"].replace(0, "")
-    return df[["Trade Date", "Long", "Short", "Product", "Mon", "Yr", "CCY"]]
+    return df[["Trade Date", "Long", "Short", "Product", "Mon", "Yr", "CCY", "CC"]]
