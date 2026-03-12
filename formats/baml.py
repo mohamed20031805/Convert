@@ -31,7 +31,9 @@ def extraire_entete(chemin_pdf, template_json=None):
                 client_parts = []
                 for j in range(i, min(i + 4, len(lignes))):
                     l = lignes[j].strip()
-                    if l and not any(x in l for x in ["CABOT","LONDON","UNITED","PAGE"]):
+                    if l and not any(x in l for x in [
+                        "CABOT", "LONDON", "UNITED", "PAGE"
+                    ]):
                         client_parts.append(l)
                 infos["Client"] = " ".join(client_parts)
                 break
@@ -67,6 +69,10 @@ def parser_product(last_contract, mon, yr):
 
 
 def extraire_positions(chemin_pdf, account_number=None):
+    """
+    account_number : ex "96Y00521" — si fourni, on traite seulement
+    les pages qui contiennent ce numéro de compte.
+    """
     toutes_les_lignes = []
 
     with pdfplumber.open(chemin_pdf) as pdf:
@@ -103,7 +109,7 @@ def extraire_positions(chemin_pdf, account_number=None):
 
             lignes = texte.split('\n')
 
-            # Chercher header
+            # ── Chercher header ──
             header_idx = None
             for j, ligne in enumerate(lignes):
                 if ("LONG" in ligne and "SHORT" in ligne
@@ -120,7 +126,7 @@ def extraire_positions(chemin_pdf, account_number=None):
                 else:
                     continue
 
-            start_idx  = header_idx + 2 if header_idx >= 0 else 0
+            start_idx   = header_idx + 2 if header_idx >= 0 else 0
             data_lignes = lignes[start_idx:]
 
             for ligne in data_lignes:
@@ -128,7 +134,7 @@ def extraire_positions(chemin_pdf, account_number=None):
                 if not stripped:
                     continue
 
-                # ── AVG LONG / AVG SHORT ──
+                # ── AVG LONG / AVG SHORT → résoudre pending ──
                 if stripped.startswith("AVG LONG:") or stripped.startswith("AVG SHORT:"):
                     if pending_total:
                         long_val  = pending_total["val"] if "LONG"  in stripped else ""
@@ -143,13 +149,18 @@ def extraire_positions(chemin_pdf, account_number=None):
                             "CCY":        pending_total["ccy"],
                             "CC":         pending_total["ccy"],
                         })
-                        print(f"  ✅ {last_trade_date} | L={long_val} | S={short_val} | {pending_total['product']}")
+                        print(
+                            f"  ✅ {last_trade_date} | "
+                            f"L={long_val} | S={short_val} | "
+                            f"{pending_total['product']}"
+                        )
                         pending_total = None
-                    last_contract = ""
+                    last_contract = ""  # Reset après chaque bloc
                     continue
 
                 # ── Ligne TOTAL : N* ──
                 if re.match(r'^[\d,\.]+\*', stripped):
+                    # Ignorer lignes système
                     if any(x in stripped for x in [
                         "COMMISSION", "GROSS", "CONVERTED", "NET PROFIT", "SEC"
                     ]):
@@ -161,6 +172,7 @@ def extraire_positions(chemin_pdf, account_number=None):
 
                     val = total_m.group(1).replace(',', '').replace('.', '')
 
+                    # Mon + Yr depuis contract brut
                     mon = yr = ""
                     mc = re.search(r'([A-Z]{3})\s+(\d{2})\b', last_contract)
                     if mc:
@@ -170,7 +182,7 @@ def extraire_positions(chemin_pdf, account_number=None):
                     product = parser_product(last_contract, mon, yr)
                     ccy     = last_cc
 
-                    # Cas 1 : N* CLOSE sans EX → attendre AVG
+                    # Cas 1 : N* CLOSE sans EX → attendre AVG LONG/SHORT
                     if "CLOSE" in stripped and not re.search(r'EX[-\s]', stripped):
                         pending_total = {
                             "val":     val,
@@ -180,7 +192,7 @@ def extraire_positions(chemin_pdf, account_number=None):
                             "ccy":     ccy,
                         }
 
-                    # Cas 2 : N* EX-... CLOSE → pending aussi (pour AVG SHORT/LONG)
+                    # Cas 2 : N* EX-... CLOSE → attendre AVG aussi
                     elif re.search(r'EX[-\s]', stripped) and "CLOSE" in stripped:
                         pending_total = {
                             "val":     val,
@@ -192,7 +204,7 @@ def extraire_positions(chemin_pdf, account_number=None):
 
                     continue
 
-                # Ignorer lignes système
+                # ── Ignorer lignes système ──
                 if any(x in ligne for x in [
                     "MERRILL", "FUTURES", "KING EDWARD", "LONDON",
                     "MORGAN", "FUND", "FCH", "CABOT", "UNITED", "KINGDOM",
@@ -208,6 +220,7 @@ def extraire_positions(chemin_pdf, account_number=None):
                     continue
 
                 # ── Ligne données FUTURES ──
+                # "12/05/5 F4 3 06 MAR 26 EUR EUR-BUND 27 128.2 EU 90.00DR"
                 m = re.match(
                     r'^(\d{1,2}/\d{1,2}/\d{1,2})\s+'
                     r'\w+\s+'
@@ -226,6 +239,7 @@ def extraire_positions(chemin_pdf, account_number=None):
                     continue
 
                 # ── Ligne données CDS ──
+                # "9/29/5 Q1 28,000 CDS JUN 30 CDXEMS43V1 100 9L US 145,755.56"
                 m_cds = re.match(
                     r'^(\d{1,2}/\d{1,2}/\d{1,2})\s+'
                     r'\w+\s+'
@@ -246,7 +260,9 @@ def extraire_positions(chemin_pdf, account_number=None):
 def formater_output(lignes):
     df = pd.DataFrame(lignes)
     if df.empty:
-        return df
+        return pd.DataFrame(columns=[
+            "Trade Date", "Long", "Short", "Product", "Mon", "Yr", "CCY", "CC"
+        ])
     df["Long"]  = pd.to_numeric(df["Long"],  errors="coerce").fillna(0).astype(int)
     df["Short"] = pd.to_numeric(df["Short"], errors="coerce").fillna(0).astype(int)
     df["Long"]  = df["Long"].replace(0,  "")
