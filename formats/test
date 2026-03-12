@@ -1,10 +1,19 @@
+cd T:\Houston\SBO-LUX\1 SBO TRV\Dev\Convert_Reconc
 python -c "
-import pdfplumber
-p = r'T:\Dallas\CSS-BOC\CTL\REC\Réconciliation dérivés listés\FUND CHANNEL\2026\BAML\MSIM_SG_EOD Daily Statement.pdf'
-with pdfplumber.open(p) as pdf:
-    page = pdf.pages[13]  # page 14
-    texte = page.extract_text() or ''
-    for ligne in texte.split('\n'):
-        if ligne.strip() and any(x in ligne for x in ['CDS', 'AVG', 'CLOSE', '*']):
-            print(repr(ligne))
-" | head -20
+import traceback
+try:
+    import formats.baml as baml
+    print('baml OK')
+except Exception as e:
+    traceback.print_exc()
+try:
+    import formats_client.baml_client as bc
+    print('baml_client OK')
+except Exception as e:
+    traceback.print_exc()
+try:
+    import app
+    print('app OK')
+except Exception as e:
+    traceback.print_exc()
+"
