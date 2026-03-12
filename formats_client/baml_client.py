@@ -34,12 +34,16 @@ def charger_accounts():
 
 
 def lire_nom_client_excel(chemin_excel):
-    """Lire ligne 3 du fichier client = nom du fond"""
+    """Lire les premières lignes pour trouver le nom du fond"""
     df_raw = pd.read_excel(chemin_excel, header=None)
     for i in range(min(6, len(df_raw))):
         row = df_raw.iloc[i]
-        valeurs = [str(v).strip() for v in row if pd.notna(v) and str(v).strip()
-                   and str(v).strip() != "nan"]
+        valeurs = [
+            str(v).strip() for v in row
+            if pd.notna(v)
+            and str(v).strip() != ""
+            and str(v).strip() != "nan"
+        ]
         if valeurs:
             texte = " ".join(valeurs)
             if len(texte) > 10:
@@ -49,12 +53,14 @@ def lire_nom_client_excel(chemin_excel):
 
 def trouver_account(nom_client_excel):
     """
-    Cherche dans accounts.json le compte correspondant au nom du fond.
+    Cherche dans accounts.json le compte correspondant.
     Retourne le dict account ou None.
     """
     accounts = charger_accounts()
-    norm_excel = normaliser(nom_client_excel)
+    if not accounts:
+        return None
 
+    norm_excel = normaliser(nom_client_excel)
     best_match = None
     best_score = 0
 
@@ -65,45 +71,65 @@ def trouver_account(nom_client_excel):
             best_score = score
             best_match = acc
 
-    # Seuil minimum : au moins la moitié des mots trouvés
-    if best_match and best_score >= max(1, len(
+    seuil = max(1, len(
         [m for m in best_match["client_name"].split() if len(m) > 2]
-    ) // 2):
+    ) // 2) if best_match else 1
+
+    if best_match and best_score >= seuil:
         return best_match
     return None
 
 
 def charger_client(chemin_excel):
-    """Charger fichier client BAML — header ligne 10"""
+    """Charger fichier client BAML — header ligne 10 (index 9)"""
     df = pd.read_excel(chemin_excel, header=9)
     df.columns = [str(c).strip() for c in df.columns]
-    # Garder seulement lignes avec Security Description
-    col_sd = next((c for c in df.columns if "Security" in c and "Desc" in c), None)
+
+    # Renommer si colonne Security Description a un nom légèrement différent
+    col_sd = next(
+        (c for c in df.columns if "Security" in c and "Desc" in c),
+        None
+    )
     if col_sd and col_sd != "Security Description":
         df = df.rename(columns={col_sd: "Security Description"})
+
+    # Garder seulement lignes avec Security Description valide
     df = df[df["Security Description"].notna()].copy()
     df = df[df["Security Description"].astype(str).str.strip() != ""].copy()
+    df = df[df["Security Description"].astype(str).str.strip() != "nan"].copy()
+
     return df
 
 
 def agréger_client(df):
-    """Share/Face > 0 = Long, < 0 (parenthèses) = Short"""
-
+    """
+    Share/Face > 0  → Long
+    Share/Face < 0  → Short (parenthèses = négatif)
+    """
     def parse_face(val):
         s = str(val).strip()
+        # Parenthèses = négatif ex: (7.00) → -7.0
         if s.startswith('(') and s.endswith(')'):
             try:
                 return -float(s[1:-1].replace(',', ''))
-            except:
+            except Exception:
                 return 0.0
         try:
-            return float(str(s).replace(',', ''))
-        except:
+            return float(s.replace(',', ''))
+        except Exception:
             return 0.0
 
     df = df.copy()
-    col_face = next((c for c in df.columns if "Share" in c or "Face" in c), None)
-    col_ccy  = next((c for c in df.columns if "Currency" in c), None)
+
+    # Détecter colonnes Share/Face et Currency
+    col_face = next(
+        (c for c in df.columns if "Share" in c or "Face" in c),
+        None
+    )
+    col_ccy = next(
+        (c for c in df.columns if "Currency" in c),
+        None
+    )
 
     if col_face:
         df["_face"] = df[col_face].apply(parse_face)
@@ -113,18 +139,21 @@ def agréger_client(df):
     df["Client_Long"]  = df["_face"].apply(lambda x: x  if x > 0 else 0)
     df["Client_Short"] = df["_face"].apply(lambda x: -x if x < 0 else 0)
 
-    resume = df.groupby("Security Description", as_index=False).agg(
-        Client_Long  = ("Client_Long",  "sum"),
-        Client_Short = ("Client_Short", "sum"),
-        Currency     = (col_ccy, "first") if col_ccy else ("Client_Long", "first"),
-    )
+    agg_dict = {
+        "Client_Long":  ("Client_Long",  "sum"),
+        "Client_Short": ("Client_Short", "sum"),
+    }
+    if col_ccy:
+        agg_dict["Currency"] = (col_ccy, "first")
+
+    resume = df.groupby("Security Description", as_index=False).agg(**agg_dict)
     return resume
 
 
 def matcher_produit(product_pdf, df_client):
     """
     Matcher product PDF avec Security Description client.
-    1. Via MAPPING + Mon/Yr
+    1. Via MAPPING + vérification Mon/Yr
     2. Fallback : tokens communs
     """
     norm_pdf = normaliser(product_pdf)
@@ -133,8 +162,9 @@ def matcher_produit(product_pdf, df_client):
     for cle, mots in MAPPING.items():
         if normaliser(cle) in norm_pdf:
             for _, row in df_client.iterrows():
-                norm_client = normaliser(row["Security Description"])
+                norm_client = normaliser(str(row["Security Description"]))
                 if all(normaliser(m) in norm_client for m in mots):
+                    # Vérifier Mon + Yr
                     mc = re.search(r'([A-Z]{3})\s*(\d{2})', product_pdf)
                     if mc:
                         mon = mc.group(1)
@@ -148,8 +178,9 @@ def matcher_produit(product_pdf, df_client):
     tokens_pdf = set(re.findall(r'[A-Z0-9]+', norm_pdf))
     best_match = None
     best_score = 0
+
     for _, row in df_client.iterrows():
-        norm_client   = normaliser(row["Security Description"])
+        norm_client   = normaliser(str(row["Security Description"]))
         tokens_client = set(re.findall(r'[A-Z0-9]+', norm_client))
         score = len(tokens_pdf & tokens_client)
         if score > best_score:
@@ -162,6 +193,11 @@ def matcher_produit(product_pdf, df_client):
 
 
 def comparer(df_pdf, df_client_raw):
+    """
+    Comparer positions PDF vs client.
+    Retourne DataFrame avec colonnes :
+    Product PDF | Security Client | Long PDF | Short PDF | Client Long | Client Short | Status
+    """
     df_client = agréger_client(df_client_raw)
     resultats = []
 
@@ -173,7 +209,9 @@ def comparer(df_pdf, df_client_raw):
         match = matcher_produit(product_pdf, df_client)
 
         if match:
-            ligne_client = df_client[df_client["Security Description"] == match].iloc[0]
+            ligne_client = df_client[
+                df_client["Security Description"] == match
+            ].iloc[0]
             client_long  = float(ligne_client["Client_Long"])
             client_short = float(ligne_client["Client_Short"])
 
@@ -182,6 +220,7 @@ def comparer(df_pdf, df_client_raw):
                 ecarts.append("ÉCART LONG")
             if short_pdf != client_short:
                 ecarts.append("ÉCART SHORT")
+
             status = ("⚠️ " + " & ".join(ecarts)) if ecarts else "✅ OK"
         else:
             match        = ""
@@ -192,4 +231,11 @@ def comparer(df_pdf, df_client_raw):
         resultats.append({
             "Product PDF":     product_pdf,
             "Security Client": match,
-            "Long PDF":        l
+            "Long PDF":        long_pdf  if long_pdf  != 0 else "",
+            "Short PDF":       short_pdf if short_pdf != 0 else "",
+            "Client Long":     client_long,
+            "Client Short":    client_short,
+            "Status":          status,
+        })
+
+    return pd.DataFrame(resultats)
