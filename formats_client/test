@@ -1,14 +1,7 @@
 python -c "
-import pdfplumber
-import re
+import extract_msg
 
-p = r'T:\Dallas\CSS-BOC\CTL\REC\Réconciliation dérivés listés\OFI\2026\01. JANVIER\20260130_DLY_STMT.pdf'
-with pdfplumber.open(p) as pdf:
-    for i, page in enumerate(pdf.pages):
-        texte = page.extract_text() or ''
-        print(f'--- PAGE {i+1} ---')
-        for ligne in texte.split('\n'):
-            if ligne.strip():
-                print(repr(ligne))
-        print()
+msg = extract_msg.openMsg(r'T:\Dallas\CSS-BOC\CTL\REC\Réconciliation dérivés listés\OFI\2026\01. JANVIER\POSITIONS DERIVES LISTES AU 30012026.msg')
+print('=== BODY ===')
+print(msg.body[:3000])
 "
