@@ -1,19 +1,85 @@
-cd T:\Houston\SBO-LUX\1 SBO TRV\Dev\Convert_Reconc
-python -c "
-import traceback
-try:
-    import formats.baml as baml
-    print('baml OK')
-except Exception as e:
-    traceback.print_exc()
-try:
-    import formats_client.baml_client as bc
-    print('baml_client OK')
-except Exception as e:
-    traceback.print_exc()
-try:
-    import app
-    print('app OK')
-except Exception as e:
-    traceback.print_exc()
-"
+# ── Mapping normalisation ──
+NORMALISATION = {
+    "2Y":       "2YR",
+    "TNOTE":    "NOTE",
+    "TNOTE":    "NOTE",
+    "ULT":      "ULTRA",
+    "ESCHATZ":  "EUROSCHATZ",
+    "ESCHATZ":  "EUROSCHATZ",
+    "FOAT":     "OAT",
+    "EURBUXL":  "EUROBUXL",
+    "EURBUND":  "EUROBUND",
+    "EURBOBL":  "EURBOBL",
+    "EURBTP":   "EURBTP",
+}
+
+
+def normaliser_produit(texte):
+    """
+    Enlever tirets, espaces, points → majuscules
+    puis appliquer les mappings
+    """
+    # Enlever tout sauf lettres et chiffres
+    n = re.sub(r'[^A-Z0-9]', '', str(texte).upper())
+
+    # Enlever mois et année (3 lettres + 2 chiffres) ex: MAR26, JUN30
+    n = re.sub(r'(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\d{2}', '', n)
+
+    # Enlever FUTURE, FUT, CONTRACT
+    for mot in ["FUTURE", "FUT", "CONTRACT", "FUTURES"]:
+        n = n.replace(mot, "")
+
+    # Appliquer mappings
+    for ancien, nouveau in NORMALISATION.items():
+        n = n.replace(ancien, nouveau)
+
+    return n.strip()
+
+
+def matcher_produit(product_pdf, df_client):
+    """
+    Matcher uniquement sur le NOM du produit normalisé
+    PAS sur mois/année
+    """
+    norm_pdf = normaliser_produit(product_pdf)
+
+    best_match = None
+    best_score = 0
+
+    for _, row in df_client.iterrows():
+        norm_client = normaliser_produit(str(row["Security Description"]))
+
+        # Score = nb caractères en commun / longueur max
+        # On vérifie si l'un contient l'autre
+        if norm_pdf in norm_client or norm_client in norm_pdf:
+            score = min(len(norm_pdf), len(norm_client))
+            if score > best_score:
+                best_score = score
+                best_match = row["Security Description"]
+        else:
+            # Tokens communs
+            tokens_pdf    = set(re.findall(r'[A-Z0-9]{2,}', norm_pdf))
+            tokens_client = set(re.findall(r'[A-Z0-9]{2,}', norm_client))
+            score = len(tokens_pdf & tokens_client)
+            if score > best_score:
+                best_score = score
+                best_match = row["Security Description"]
+
+    if best_score >= 1:
+        return best_match
+    return None
+```
+
+🎯 Exemples :
+```
+PDF     : "EUR-BUND MAR 26"  → norm → "EUROBUND"
+Client  : "EURO BUND FUTURE MAR26" → norm → "EUROBUND"
+Match ✅
+
+PDF     : "ULT TNOTE MAR 26" → norm → "ULTRANOTE"  
+Client  : "US ULTRA 10YR NOTE FUT MAR26" → norm → "USULTRA10YRNOTE"
+Match ✅ (ULTRA + NOTE en commun)
+
+PDF     : "E-SCHATZ MAR 26"  → norm → "EUROSCHATZ"
+Client  : "EURO-SCHATZ MAR26" → norm → "EUROSCHATZ"
+Match ✅
