@@ -1,10 +1,14 @@
 python -c "
-from formats import societe_generale as sg
 import pdfplumber
+from formats import societe_generale as sg
+
 p = r'T:\Dallas\CSS-BOC\CTL\REC\Réconciliation dérivés listés\ASB AXION\2026\01. JANVIER\20260130_DLY_STMT.pdf'
 with pdfplumber.open(p) as pdf:
-    texte = pdf.pages[0].extract_text() or ''
-print('SOCIETE GENERALE in texte:', 'SOCIETE GENERALE' in texte)
-print('Detailed Statements in texte:', 'Detailed Statements' in texte)
-print('detecter:', sg.detecter(texte))
+    for i, page in enumerate(pdf.pages):
+        texte = page.extract_text() or ''
+        result = sg.detecter(texte)
+        print(f'Page {i+1}: detecter={result}')
+        if result:
+            print('  TROUVÉ !')
+            break
 "
