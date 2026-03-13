@@ -1,9 +1,6 @@
 python -c "
-from formats import societe_generale as sg
-import pdfplumber
-
-p = r'T:\Dallas\CSS-BOC\CTL\REC\Réconciliation dérivés listés\ASB AXION\2026\01. JANVIER\20260130_DLY_STMT.pdf'
-lignes = sg.extraire_positions(p)
-for l in lignes:
-    print(l)
+with open('formats/societe_generale.py') as f:
+    for i, line in enumerate(f, 1):
+        if 70 <= i <= 95:
+            print(f'{i:3}: {repr(line)}')
 "
