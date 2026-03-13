@@ -3,15 +3,11 @@ import pandas as pd
 xl = pd.ExcelFile(r'T:\Dallas\CSS-BOC\CTL\REC\Réconciliation dérivés listés\ASB AXION\2026\01. JANVIER\PTF_AXB_AXI_SICAV_31_01_2026.xlsx')
 for sheet in xl.sheet_names:
     df = pd.read_excel(xl, sheet_name=sheet, header=None)
-    # Desc Port ligne 4 (index 3) col D
-    try:
-        desc = df.iloc[3, 3]
-        print(f'Onglet: {sheet} | Desc.Port: {desc}')
-        # Header ligne 9 (index 9)
-        df2 = pd.read_excel(xl, sheet_name=sheet, header=9)
-        if 'Descrizione' in df2.columns:
-            print(df2[['Descrizione','Qta']].dropna(subset=['Descrizione']).to_string())
-    except Exception as e:
-        print(f'  erreur: {e}')
+    print(f'=== {sheet} ===')
+    # Afficher lignes 0-10 completes
+    for i in range(min(11, len(df))):
+        row = [str(v) for v in df.iloc[i] if str(v) != 'nan']
+        if row:
+            print(f'  Ligne {i+1}: {row}')
     print()
 "
