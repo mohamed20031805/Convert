@@ -1,27 +1,17 @@
 python -c "
-from formats import societe_generale as sg
-
-pdfs = [
-    r'T:\Dallas\CSS-BOC\CTL\REC\Réconciliation dérivés listés\DEMERGON\2026\01. JANVIER\20260130_DLY_STMT.pdf',
-    r'T:\Dallas\CSS-BOC\CTL\REC\Réconciliation dérivés listés\OFI\2026\01. JANVIER\20260130_DLY_STMT.pdf',
-    r'T:\Dallas\CSS-BOC\CTL\REC\Réconciliation dérivés listés\TALENTS\2026\01. JANVIER\20260130_DLY_STMT.pdf',
-    r'T:\Dallas\CSS-BOC\CTL\REC\Réconciliation dérivés listés\VG ANTEO\2026\01. JANVIER\20260130_DLY_STMT.pdf',
-    r'T:\Dallas\CSS-BOC\CTL\REC\Réconciliation dérivés listés\VG ARDESIA\2026\01. JANVIER\20260130_DLY_STMT.pdf',
-    r'T:\Dallas\CSS-BOC\CTL\REC\Réconciliation dérivés listés\IVO FUNDS\2026\01. JANVIER\20260130_DLY_STMT.pdf',
-]
-
-for p in pdfs:
-    print(f'\n========== {p.split(chr(92))[-3]} ==========')
+import pandas as pd
+xl = pd.ExcelFile(r'T:\Dallas\CSS-BOC\CTL\REC\Réconciliation dérivés listés\ASB AXION\2026\01. JANVIER\PTF_AXB_AXI_SICAV_31_01_2026.xlsx')
+for sheet in xl.sheet_names:
+    df = pd.read_excel(xl, sheet_name=sheet, header=None)
+    # Desc Port ligne 4 (index 3) col D
     try:
-        entete = sg.extraire_entete(p)
-        print(f'Client  : {entete[\"Client\"]}')
-        print(f'Account : {entete[\"Account\"]}')
-        lignes = sg.extraire_positions(p)
-        print(f'Positions : {len(lignes)}')
-        for l in lignes:
-            print(f'  {l}')
+        desc = df.iloc[3, 3]
+        print(f'Onglet: {sheet} | Desc.Port: {desc}')
+        # Header ligne 9 (index 9)
+        df2 = pd.read_excel(xl, sheet_name=sheet, header=9)
+        if 'Descrizione' in df2.columns:
+            print(df2[['Descrizione','Qta']].dropna(subset=['Descrizione']).to_string())
     except Exception as e:
-        print(f'❌ ERREUR : {e}')
-        import traceback
-        traceback.print_exc()
+        print(f'  erreur: {e}')
+    print()
 "
