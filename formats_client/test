@@ -1,12 +1,16 @@
-python -c "
-import pandas as pd
-xl = r'T:\Dallas\CSS-BOC\CTL\REC\Réconciliation dérivés listés\ASB AXION\2026\01. JANVIER\PTF_AXB_AXI_SICAV_31_01_2026.xlsx'
-xf = pd.ExcelFile(xl)
-for sheet in xf.sheet_names:
-    df = pd.read_excel(xf, sheet_name=sheet, header=None)
-    row3 = df.iloc[3]  # ligne 4 index 3
-    print(f'=== {sheet} ===')
-    for i, v in enumerate(row3):
-        if str(v).strip() not in ['', 'nan']:
-            print(f'  col {i} ({chr(65+i)}): {repr(v)}')
-"
+def lire_desc_port(df_raw):
+    """
+    Chercher 'Desc. Port.' dans les 8 premières lignes
+    et retourner la valeur qui suit sur la même ligne
+    """
+    for i in range(8):
+        row = df_raw.iloc[i]
+        row_list = list(row)
+        for j, v in enumerate(row_list):
+            if "Desc" in str(v) and "Port" in str(v):
+                # Valeur suivante non nulle
+                for k in range(j+1, len(row_list)):
+                    val = str(row_list[k]).strip()
+                    if val and val != "nan":
+                        return val
+    return ""
