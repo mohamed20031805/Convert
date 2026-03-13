@@ -1,73 +1,36 @@
-# ── Mapping DIRECT PDF → Security Description client ──
-MAPPING_DIRECT = {
-    "10Y T-BOND":  "AUST 10YR BOND FUT",
-    "LONG GILT":   "LONG GILT",
-    "EUR-BOBL":    "EURO BOBL FUTURE",
-    "EURO-BUXL":   "EURO BUXL FUTURE",
-    "EUR-BUXL":    "EURO BUXL FUTURE",
-    "FOAT":        "EURO OAT",
-    "EUR-BTP":     "EURO-BTP",
-    "EURO-BTP":    "EURO-BTP",
-    "EUR-BUND":    "EURO-BUND FUTURE",
-    "EURO-BUND":   "EURO-BUND FUTURE",
-    "E-SCHATZ":    "EURO-SCHATZ",
-    "10Y TNOTE":   "US 10YR NOTE",
-    "10Y T-NOTE":  "US 10YR NOTE",
-    "2Y T-NOTE":   "US 2YR NOTE",
-    "2Y TNOTE":    "US 2YR NOTE",
-    "5Y T-NOTE":   "US 5YR NOTE",
-    "5Y TNOTE":    "US 5YR NOTE",
-    "ULT TNOTE":   "US ULTRA 10YR NOTE",
-    "ULTRA TNOTE": "US ULTRA 10YR NOTE",
-}
-
-
-def normaliser(texte):
-    return re.sub(r'[^A-Z0-9]', '', str(texte).upper())
-
-
 def matcher_produit(product_pdf, df_client):
     """
-    1. Chercher dans MAPPING_DIRECT le mot-clé PDF
-    2. Chercher dans df_client la Security Description qui contient ce mot-clé
+    Matcher sur NOM + MOIS + ANNÉE ensemble
     """
     product_upper = product_pdf.upper().strip()
 
-    # Étape 1 : MAPPING_DIRECT
+    # Extraire Mon + Yr depuis le produit PDF
+    mc = re.search(r'(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s*(\d{2})', product_upper)
+    mon_pdf = mc.group(1) if mc else ""
+    yr_pdf  = mc.group(2) if mc else ""
+
+    # Étape 1 : MAPPING_DIRECT + vérifier Mon + Yr
     for cle_pdf, cle_client in MAPPING_DIRECT.items():
         if cle_pdf.upper() in product_upper:
-            # Chercher dans df_client
             for _, row in df_client.iterrows():
                 desc = str(row["Security Description"]).upper()
                 if cle_client.upper() in desc:
-                    return row["Security Description"]
+                    # Vérifier mois + année dans description client
+                    mc2 = re.search(
+                        r'(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s*(\d{2})',
+                        desc
+                    )
+                    mon_client = mc2.group(1) if mc2 else ""
+                    yr_client  = mc2.group(2) if mc2 else ""
 
-    # Étape 2 : fallback tokens normalisés
-    norm_pdf   = normaliser(product_upper)
-    # Enlever mois/année
-    norm_pdf   = re.sub(
-        r'(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\d{2}', '',
-        norm_pdf
-    )
+                    if mon_pdf == mon_client and yr_pdf == yr_client:
+                        return row["Security Description"]
 
-    best_match = None
-    best_score = 0
-
-    for _, row in df_client.iterrows():
-        norm_client = normaliser(str(row["Security Description"]))
-        norm_client = re.sub(
-            r'(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\d{2}', '',
-            norm_client
-        )
-
-        tokens_pdf    = set(re.findall(r'[A-Z0-9]{2,}', norm_pdf))
-        tokens_client = set(re.findall(r'[A-Z0-9]{2,}', norm_client))
-        score = len(tokens_pdf & tokens_client)
-
-        if score > best_score:
-            best_score = score
-            best_match = row["Security Description"]
-
-    if best_score >= 2:
-        return best_match
     return None
+```
+
+🎯 Maintenant :
+```
+PDF    : "JUN 26 CBT 2Y T-NOTE"  → cle="2Y T-NOTE" + MON=JUN + YR=26
+Client : "US 2YR NOTE MAR 26"    → MON=MAR + YR=26 → ❌ pas match
+Client : "US 2YR NOTE JUN 26"    → MON=JUN + YR=26 → ✅ match !
