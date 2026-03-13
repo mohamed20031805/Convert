@@ -1,47 +1,116 @@
-def trouver_onglet(client_pdf, onglets):
-    norm_pdf = normaliser(client_pdf)
-    best_match = None
-    best_score = 0
+def extraire_positions(chemin_pdf):
+    toutes_les_lignes = []
 
-    for desc, df in onglets.items():
-        norm_desc = normaliser(desc)
-        tokens_pdf  = set(re.findall(r'[A-Z]{3,}', norm_pdf))
-        tokens_desc = set(re.findall(r'[A-Z]{3,}', norm_desc))
-        score = len(tokens_pdf & tokens_desc)
-        print(f"  Score {desc}: {score} | communs: {tokens_pdf & tokens_desc}")
-        if score > best_score:
-            best_score = score
-            best_match = desc
+    with pdfplumber.open(chemin_pdf) as pdf:
+        for i, page in enumerate(pdf.pages):
+            texte = page.extract_text()
+            if not texte:
+                continue
 
-    print(f"✅ Meilleur match: {best_match} (score={best_score})")
-    if best_score >= 1:
-        return best_match
-    return None
+            lignes = texte.split('\n')
+
+            # ── Détecter account + client sur cette page ──
+            current_account = ""
+            current_client  = ""
+            for ligne in lignes:
+                m = re.search(r'ACCOUNT NUMBER\s*:\s*(.+)', ligne)
+                if m:
+                    current_account = m.group(1).strip()
+                # Chercher nom client (ligne avec fund/sicav)
+                if any(x in ligne.upper() for x in ["FUND", "SICAV"]) and \
+                   not any(x in ligne for x in ["LME", "DERIVATIVE", "EXCHANGE"]):
+                    if ligne.strip() and len(ligne.strip()) > 5:
+                        current_client = ligne.strip()
+
+            # ── Chercher OPEN POSITIONS ──
+            header_idx = None
+            for j, ligne in enumerate(lignes):
+                if ("LONG" in ligne and "SHORT" in ligne
+                        and "TRADE" in ligne and "CONTRACT" in ligne):
+                    header_idx = j
+                    break
+
+            if header_idx is None:
+                continue
+
+            last_contract   = ""
+            last_trade_date = ""
+            last_cc         = ""
+            pending_total   = None
+
+            for ligne in lignes[header_idx + 2:]:
+                stripped = ligne.strip()
+                if not stripped:
+                    continue
+
+                if any(x in ligne for x in [
+                    "BEGINNING ACCOUNT", "CASH JOURNALS",
+                    "ENDING ACCOUNT", "LME TRADES", "DERIVATIVE"
+                ]):
+                    break
+
+                if stripped.startswith("AVG LONG:") or stripped.startswith("AVG SHORT:"):
+                    if pending_total:
+                        long_val  = pending_total["val"] if "LONG"  in stripped else ""
+                        short_val = pending_total["val"] if "SHORT" in stripped else ""
+                        toutes_les_lignes.append({
+                            "Account":    current_account,   # ← NOUVEAU
+                            "Client":     current_client,    # ← NOUVEAU
+                            "Trade Date": last_trade_date,
+                            "Long":       long_val,
+                            "Short":      short_val,
+                            "Product":    pending_total["product"],
+                            "Mon":        pending_total["mon"],
+                            "Yr":         pending_total["yr"],
+                            "CCY":        pending_total["ccy"],
+                        })
+                        pending_total = None
+                    last_contract = ""
+                    continue
+
+                if re.match(r'^[\d,]+\*', stripped) and "CLOSE" in stripped:
+                    total_m = re.match(r'^([\d,]+)\*', stripped)
+                    if not total_m or not last_contract:
+                        continue
+                    val = total_m.group(1).replace(',', '')
+                    mon = yr = ""
+                    mc = re.search(r'([A-Z]{3})\s+(\d{2})\b', last_contract)
+                    if mc:
+                        mon = mc.group(1)
+                        yr  = mc.group(2)
+                    pending_total = {
+                        "val": val, "product": last_contract,
+                        "mon": mon, "yr": yr, "ccy": last_cc,
+                    }
+                    continue
+
+                if any(x in ligne for x in [
+                    "------", "* * *", "** US", "** SWISS", "** EURO",
+                    "** JAPANESE", "** BRITISH", "TOTAL CONVERTED",
+                    "FUNDS PAID", "O P E N", "C O N F"
+                ]):
+                    continue
+
+                m = re.match(
+                    r'^(\w+)\s+\w+\s+\w+\s+([\d,]+)\s+(.+?)\s+\d+\s+[\d\.]+\s+([A-Z]{2})\s+',
+                    stripped
+                )
+                if m:
+                    last_trade_date = m.group(1)
+                    last_contract   = m.group(3).strip()
+                    last_cc         = m.group(4).strip()
+
+    return toutes_les_lignes
 
 
-def matcher_produit(product_pdf, df_client):
-    product_upper = product_pdf.upper().strip()
-
-    mc = re.search(
-        r'(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s*(\d{2})',
-        product_upper
-    )
-    mon_pdf = mc.group(1) if mc else ""
-    yr_pdf  = mc.group(2) if mc else ""
-
-    for cle_pdf, cle_client in MAPPING_DIRECT.items():
-        if cle_pdf.upper() in product_upper:
-            for _, row in df_client.iterrows():
-                # Enlever * de la description client
-                desc = str(row["Descrizione"]).upper().replace("*", "").strip()
-                if cle_client.upper() in desc:
-                    mc2 = re.search(
-                        r'(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s*(\d{2})',
-                        desc
-                    )
-                    mon_c = mc2.group(1) if mc2 else ""
-                    yr_c  = mc2.group(2) if mc2 else ""
-                    if mon_pdf == mon_c and yr_pdf == yr_c:
-                        return row["Descrizione"]
-
-    return None
+def formater_output(lignes):
+    df = pd.DataFrame(lignes)
+    if df.empty:
+        return pd.DataFrame(columns=[
+            "Account", "Client", "Trade Date", "Long", "Short", "Product", "Mon", "Yr", "CCY"
+        ])
+    df["Long"]  = pd.to_numeric(df["Long"],  errors="coerce").fillna(0).astype(int)
+    df["Short"] = pd.to_numeric(df["Short"], errors="coerce").fillna(0).astype(int)
+    df["Long"]  = df["Long"].replace(0,  "")
+    df["Short"] = df["Short"].replace(0, "")
+    return df[["Account", "Client", "Trade Date", "Long", "Short", "Product", "Mon", "Yr", "CCY"]]
