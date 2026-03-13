@@ -1,26 +1,26 @@
-python -c "
-from formats_client import sg_client
-import pandas as pd
+def trouver_onglet(client_pdf, onglets):
+    # Tokeniser sur les mots AVANT normalisation
+    STOP_WORDS = {"ASB", "AXION", "SICAV", "FUND", "SA", "BANK",
+                  "SWISS", "BANCASTATO", "AZIONARIO", "AND", "THE"}
 
-xl = r'T:\Dallas\CSS-BOC\CTL\REC\Réconciliation dérivés listés\ASB AXION\2026\01. JANVIER\PTF_AXB_AXI_SICAV_31_01_2026.xlsx'
-onglets = sg_client.charger_client(xl)
+    tokens_pdf = set(
+        w.upper() for w in re.findall(r'[A-Za-z]{3,}', client_pdf)
+    ) - STOP_WORDS
 
-print('=== ONGLETS CHARGES ===')
-for desc in onglets:
-    print(f'  [{repr(desc)}]')
+    best_match = None
+    best_score = 0
 
-print()
-print('=== TEST TROUVER ONGLET ===')
-clients = [
-    'ASB AXION SICAV - KERMATA FUND - AXION SWISS BANK SA',
-    'ASB AXION SICAV BANCASTATO - AZIONARIO GLOBALE FUND',
-    'ASB AXION SICAV - UNCONSTRAINED - BOND FUND',
-    'ASB AXION SICAV-BANCASTATO - REDDITO FUND',
-    'ASB AXION SICAV-BANCASTATO - BILANCIATO FUND',
-]
-for c in clients:
-    match = sg_client.trouver_onglet(c, onglets)
-    print(f'  PDF: {c}')
-    print(f'  Match: {match}')
-    print()
-"
+    for desc, df in onglets.items():
+        tokens_desc = set(
+            w.upper() for w in re.findall(r'[A-Za-z]{3,}', desc)
+        ) - STOP_WORDS
+
+        score = len(tokens_pdf & tokens_desc)
+        print(f"  [{desc}] tokens_pdf={tokens_pdf} & tokens_desc={tokens_desc} = {tokens_pdf & tokens_desc} score={score}")
+
+        if score > best_score:
+            best_score = score
+            best_match = desc
+
+    print(f"✅ Match: {best_match} (score={best_score})")
+    return best_match if best_score >= 1 else None
