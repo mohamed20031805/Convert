@@ -1,36 +1,12 @@
-def matcher_produit(product_pdf, df_client):
-    """
-    Matcher sur NOM + MOIS + ANNÉE ensemble
-    """
-    product_upper = product_pdf.upper().strip()
-
-    # Extraire Mon + Yr depuis le produit PDF
-    mc = re.search(r'(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s*(\d{2})', product_upper)
-    mon_pdf = mc.group(1) if mc else ""
-    yr_pdf  = mc.group(2) if mc else ""
-
-    # Étape 1 : MAPPING_DIRECT + vérifier Mon + Yr
-    for cle_pdf, cle_client in MAPPING_DIRECT.items():
-        if cle_pdf.upper() in product_upper:
-            for _, row in df_client.iterrows():
-                desc = str(row["Security Description"]).upper()
-                if cle_client.upper() in desc:
-                    # Vérifier mois + année dans description client
-                    mc2 = re.search(
-                        r'(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s*(\d{2})',
-                        desc
-                    )
-                    mon_client = mc2.group(1) if mc2 else ""
-                    yr_client  = mc2.group(2) if mc2 else ""
-
-                    if mon_pdf == mon_client and yr_pdf == yr_client:
-                        return row["Security Description"]
-
-    return None
-```
-
-🎯 Maintenant :
-```
-PDF    : "JUN 26 CBT 2Y T-NOTE"  → cle="2Y T-NOTE" + MON=JUN + YR=26
-Client : "US 2YR NOTE MAR 26"    → MON=MAR + YR=26 → ❌ pas match
-Client : "US 2YR NOTE JUN 26"    → MON=JUN + YR=26 → ✅ match !
+python -c "
+import pdfplumber
+p = r'T:\Dallas\CSS-BOC\CTL\REC\Réconciliation dérivés listés\ASB AXION\2026\01. JANVIER\20260130_DLY_STMT.pdf'
+with pdfplumber.open(p) as pdf:
+    for i, page in enumerate(pdf.pages[:3]):
+        texte = page.extract_text() or ''
+        print(f'--- PAGE {i+1} ---')
+        for ligne in texte.split('\n'):
+            if ligne.strip():
+                print(repr(ligne))
+        print()
+"
