@@ -1,0 +1,49 @@
+elif nom_format == "societe_generale":
+    st.subheader("4️⃣  Comparer avec le Doc Client SG")
+
+    # ── Upload multiple fichiers ──
+    client_files = st.file_uploader(
+        "Chargez le(s) fichier(s) Excel client SG",
+        type=["xlsx", "xls"],
+        key="client_upload_sg",
+        accept_multiple_files=True  # ← plusieurs fichiers
+    )
+
+    if client_files:
+        tmp_paths = []
+        try:
+            # ── Merger tous les onglets de tous les fichiers ──
+            onglets_total = {}
+            for client_file in client_files:
+                with tempfile.NamedTemporaryFile(
+                    delete=False, suffix=".xlsx"
+                ) as tmp_c:
+                    tmp_c.write(client_file.read())
+                    tmp_paths.append(tmp_c.name)
+
+                onglets = sg_client.charger_client(tmp_c.name)
+                onglets_total.update(onglets)
+
+            st.info(
+                f"📑 **{len(onglets_total)} onglets** chargés : "
+                f"{list(onglets_total.keys())}"
+            )
+
+            client_pdf = entete.get("Client", "")
+            st.info(f"📋 Client PDF : **{client_pdf}**")
+
+            df_compare = sg_client.comparer(
+                output_df, onglets_total, client_pdf
+            )
+
+            st.subheader("📊 Comparaison PDF ↔ Client SG")
+            afficher_comparaison(df_compare)
+
+        except Exception as e:
+            st.error(f"❌ Erreur : {e}")
+            import traceback
+            st.code(traceback.format_exc())
+        finally:
+            for p in tmp_paths:
+                if os.path.exists(p):
+                    os.remove(p)
