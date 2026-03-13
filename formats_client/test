@@ -1,16 +1,12 @@
 python -c "
-from formats_client import sg_client
-from formats import societe_generale as sg
-
-p = r'T:\Dallas\CSS-BOC\CTL\REC\Réconciliation dérivés listés\ASB AXION\2026\01. JANVIER\20260130_DLY_STMT.pdf'
-xl = r'T:\Dallas\CSS-BOC\CTL\REC\Réconciliation dérivés listés\ASB AXION\2026\01. JANVIER\PTF_AXB_AXI_SICAV_31_01_2026.xlsx'
-
-onglets = sg_client.charger_client(xl)
-lignes  = sg.extraire_positions(p)
-
 import pandas as pd
-df_pdf = sg.formater_output(lignes)
-
-df_compare = sg_client.comparer(df_pdf, onglets)
-print(df_compare[['Account','Desc.Port.','Product PDF','Long PDF','Client Long','Status']].to_string())
+xl = r'T:\Dallas\CSS-BOC\CTL\REC\Réconciliation dérivés listés\ASB AXION\2026\01. JANVIER\PTF_AXB_AXI_SICAV_31_01_2026.xlsx'
+xf = pd.ExcelFile(xl)
+for sheet in xf.sheet_names:
+    df = pd.read_excel(xf, sheet_name=sheet, header=None)
+    row3 = df.iloc[3]  # ligne 4 index 3
+    print(f'=== {sheet} ===')
+    for i, v in enumerate(row3):
+        if str(v).strip() not in ['', 'nan']:
+            print(f'  col {i} ({chr(65+i)}): {repr(v)}')
 "
