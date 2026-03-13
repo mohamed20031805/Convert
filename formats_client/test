@@ -1,6 +1,38 @@
-python -c "
-with open('formats/societe_generale.py') as f:
-    for i, line in enumerate(f, 1):
-        if 70 <= i <= 95:
-            print(f'{i:3}: {repr(line)}')
-"
+def trouver_onglet(client_pdf, onglets):
+    """
+    Matching intelligent :
+    "ASB AXION SICAV - KERMATA FUND - AXION SWISS BANK SA"
+    ↔ "ASB Kermata Fund"
+    """
+    norm_pdf = normaliser(client_pdf)
+
+    # Mots à ignorer pour le matching
+    STOP_WORDS = {"ASB", "AXION", "SICAV", "FUND", "SA", "BANK",
+                  "SWISS", "BANCASTATO", "AZIONARIO"}
+
+    best_match = None
+    best_score = 0
+
+    for desc, df in onglets.items():
+        norm_desc   = normaliser(desc)
+        tokens_pdf  = set(re.findall(r'[A-Z]{3,}', norm_pdf))  - STOP_WORDS
+        tokens_desc = set(re.findall(r'[A-Z]{3,}', norm_desc)) - STOP_WORDS
+        score = len(tokens_pdf & tokens_desc)
+        print(f"  [{desc}] tokens_pdf={tokens_pdf} tokens_desc={tokens_desc} score={score}")
+        if score > best_score:
+            best_score = score
+            best_match = desc
+
+    # Si score=0 → fallback : prendre le plus de tokens communs sans stop words
+    if best_score == 0:
+        for desc, df in onglets.items():
+            norm_desc   = normaliser(desc)
+            tokens_pdf  = set(re.findall(r'[A-Z]{3,}', norm_pdf))
+            tokens_desc = set(re.findall(r'[A-Z]{3,}', norm_desc))
+            score = len(tokens_pdf & tokens_desc)
+            if score > best_score:
+                best_score = score
+                best_match = desc
+
+    print(f"✅ Meilleur match: {best_match} (score={best_score})")
+    return best_match if best_score >= 1 else None
