@@ -1,22 +1,33 @@
-python -c "
-import pdfplumber
-import re
+def extraire_client_page(lignes):
+    """
+    Extraire le nom client depuis les lignes de la page.
+    Le nom est entre l'adresse SG et ATTN/CONFIRMATIONS.
+    """
+    client_parts = []
+    capture = False
 
-p = r'T:\Dallas\CSS-BOC\CTL\REC\Réconciliation dérivés listés\ASB AXION\2026\01. JANVIER\20260130_DLY_STMT.pdf'
-with pdfplumber.open(p) as pdf:
-    for i, page in enumerate(pdf.pages[:6]):
-        texte = page.extract_text() or ''
-        account = ''
-        client  = ''
-        for ligne in texte.split('\n'):
-            m = re.search(r'ACCOUNT NUMBER\s*:\s*(.+)', ligne)
-            if m:
-                account = m.group(1).strip()
-            if any(x in ligne.upper() for x in ['FUND', 'SICAV']) and \
-               not any(x in ligne for x in ['LME', 'DERIVATIVE', 'EXCHANGE']):
-                if ligne.strip() and len(ligne.strip()) > 5:
-                    client = ligne.strip()
-        print(f'Page {i+1} | Account: {account}')
-        print(f'         Client extrait: {repr(client)}')
-        print()
-"
+    for ligne in lignes:
+        l = ligne.strip()
+
+        # Commencer à capturer après adresse SG
+        if any(x in l for x in ["PARIS LA DEFENSE", "COURS VALMY", "92987"]):
+            capture = True
+            continue
+
+        if capture:
+            # Arrêter à ATTN ou CONFIRMATIONS
+            if any(x in l for x in ["ATTN", "CONFIRMATION", "DISCRETIONARY"]):
+                break
+            # Ignorer lignes adresse client (numéros, pays, villes)
+            if not l:
+                continue
+            if any(x in l for x in [
+                "SWITZERLAND", "LUXEMBOURG", "VIA ", "69000", "L-2520",
+                "L 2520", "5 ALLEE", "SCHEFFER", "LUGANO", "EMILIO"
+            ]):
+                continue
+            # Garder lignes avec contenu
+            if len(l) > 3:
+                client_parts.append(l)
+
+    return " - ".join(client_parts) if client_parts else ""
