@@ -1,38 +1,16 @@
-def trouver_onglet(client_pdf, onglets):
-    """
-    Matching intelligent :
-    "ASB AXION SICAV - KERMATA FUND - AXION SWISS BANK SA"
-    ↔ "ASB Kermata Fund"
-    """
-    norm_pdf = normaliser(client_pdf)
+python -c "
+from formats_client import sg_client
+from formats import societe_generale as sg
 
-    # Mots à ignorer pour le matching
-    STOP_WORDS = {"ASB", "AXION", "SICAV", "FUND", "SA", "BANK",
-                  "SWISS", "BANCASTATO", "AZIONARIO"}
+p = r'T:\Dallas\CSS-BOC\CTL\REC\Réconciliation dérivés listés\ASB AXION\2026\01. JANVIER\20260130_DLY_STMT.pdf'
+xl = r'T:\Dallas\CSS-BOC\CTL\REC\Réconciliation dérivés listés\ASB AXION\2026\01. JANVIER\PTF_AXB_AXI_SICAV_31_01_2026.xlsx'
 
-    best_match = None
-    best_score = 0
+onglets = sg_client.charger_client(xl)
+lignes  = sg.extraire_positions(p)
 
-    for desc, df in onglets.items():
-        norm_desc   = normaliser(desc)
-        tokens_pdf  = set(re.findall(r'[A-Z]{3,}', norm_pdf))  - STOP_WORDS
-        tokens_desc = set(re.findall(r'[A-Z]{3,}', norm_desc)) - STOP_WORDS
-        score = len(tokens_pdf & tokens_desc)
-        print(f"  [{desc}] tokens_pdf={tokens_pdf} tokens_desc={tokens_desc} score={score}")
-        if score > best_score:
-            best_score = score
-            best_match = desc
+import pandas as pd
+df_pdf = sg.formater_output(lignes)
 
-    # Si score=0 → fallback : prendre le plus de tokens communs sans stop words
-    if best_score == 0:
-        for desc, df in onglets.items():
-            norm_desc   = normaliser(desc)
-            tokens_pdf  = set(re.findall(r'[A-Z]{3,}', norm_pdf))
-            tokens_desc = set(re.findall(r'[A-Z]{3,}', norm_desc))
-            score = len(tokens_pdf & tokens_desc)
-            if score > best_score:
-                best_score = score
-                best_match = desc
-
-    print(f"✅ Meilleur match: {best_match} (score={best_score})")
-    return best_match if best_score >= 1 else None
+df_compare = sg_client.comparer(df_pdf, onglets)
+print(df_compare[['Account','Desc.Port.','Product PDF','Long PDF','Client Long','Status']].to_string())
+"
