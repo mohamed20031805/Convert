@@ -1,6 +1,27 @@
 python -c "
 from formats import societe_generale as sg
-lignes = sg.extraire_positions(r'T:\Dallas\CSS-BOC\CTL\REC\Réconciliation dérivés listés\ASB AXION\2026\01. JANVIER\20260130_DLY_STMT.pdf')
-for l in lignes:
-    print(l)
+
+pdfs = [
+    r'T:\Dallas\CSS-BOC\CTL\REC\Réconciliation dérivés listés\DEMERGON\2026\01. JANVIER\20260130_DLY_STMT.pdf',
+    r'T:\Dallas\CSS-BOC\CTL\REC\Réconciliation dérivés listés\OFI\2026\01. JANVIER\20260130_DLY_STMT.pdf',
+    r'T:\Dallas\CSS-BOC\CTL\REC\Réconciliation dérivés listés\TALENTS\2026\01. JANVIER\20260130_DLY_STMT.pdf',
+    r'T:\Dallas\CSS-BOC\CTL\REC\Réconciliation dérivés listés\VG ANTEO\2026\01. JANVIER\20260130_DLY_STMT.pdf',
+    r'T:\Dallas\CSS-BOC\CTL\REC\Réconciliation dérivés listés\VG ARDESIA\2026\01. JANVIER\20260130_DLY_STMT.pdf',
+    r'T:\Dallas\CSS-BOC\CTL\REC\Réconciliation dérivés listés\IVO FUNDS\2026\01. JANVIER\20260130_DLY_STMT.pdf',
+]
+
+for p in pdfs:
+    print(f'\n========== {p.split(chr(92))[-3]} ==========')
+    try:
+        entete = sg.extraire_entete(p)
+        print(f'Client  : {entete[\"Client\"]}')
+        print(f'Account : {entete[\"Account\"]}')
+        lignes = sg.extraire_positions(p)
+        print(f'Positions : {len(lignes)}')
+        for l in lignes:
+            print(f'  {l}')
+    except Exception as e:
+        print(f'❌ ERREUR : {e}')
+        import traceback
+        traceback.print_exc()
 "
