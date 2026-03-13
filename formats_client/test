@@ -1,63 +1,42 @@
-def comparer(df_pdf, onglets, account_filter=None):
-    """
-    df_pdf contient colonnes Account + Client
-    On compare chaque groupe Account séparément
-    """
-    resultats = []
+MAPPING_DIRECT = {
+    "IMM EURO FX":  "EURO FX CURR FUT",
+    "EURO FX":      "EURO FX CURR FUT",
+    "SWISS FRANC":  "CHF CURRENCY FUT",
+    "IMM SF":       "CHF CURRENCY FUT",
+    "EURO FX/SF":   "EUR/CHF FUTURE",
+    "EUR/CHF":      "EUR/CHF FUTURE",
+}
 
-    # Grouper par Account
-    if "Account" in df_pdf.columns:
-        groupes = df_pdf.groupby("Account")
-    else:
-        groupes = [("", df_pdf)]
 
-    for account, df_group in groupes:
-        # Trouver le nom client de ce groupe
-        client_pdf = df_group["Client"].iloc[0] if "Client" in df_group.columns else ""
+def matcher_produit(product_pdf, df_client):
+    product_upper = product_pdf.upper().strip()
 
-        # Trouver l'onglet correspondant
-        desc_match = trouver_onglet(client_pdf, onglets)
-        if not desc_match:
-            # Essayer avec account number
-            for desc in onglets:
-                if account and account.replace(" ", "") in desc.replace(" ", ""):
-                    desc_match = desc
-                    break
+    # Extraire Mon + Yr depuis produit PDF
+    mc = re.search(
+        r'(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s*(\d{2})',
+        product_upper
+    )
+    mon_pdf = mc.group(1) if mc else ""
+    yr_pdf  = mc.group(2) if mc else ""
 
-        if not desc_match:
-            df_client = pd.DataFrame(columns=["Descrizione", "Client_Long", "Client_Short"])
-        else:
-            df_client = agréger_client(onglets[desc_match])
+    for cle_pdf, cle_client in MAPPING_DIRECT.items():
+        if cle_pdf.upper() in product_upper:
+            for _, row in df_client.iterrows():
+                # Nettoyer la description client : enlever *, espaces
+                desc_raw = str(row["Descrizione"])
+                desc     = desc_raw.upper().replace("*", "").strip()
 
-        for _, row in df_group.iterrows():
-            product_pdf = str(row.get("Product", "")).strip()
-            long_pdf    = float(row.get("Long",  0) or 0)
-            short_pdf   = float(row.get("Short", 0) or 0)
+                if cle_client.upper() in desc:
+                    # Extraire Mon + Yr du client
+                    # "Mar26" ou "Mar 26" → les deux cas
+                    mc2 = re.search(
+                        r'(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s*(\d{2})',
+                        desc
+                    )
+                    mon_c = mc2.group(1) if mc2 else ""
+                    yr_c  = mc2.group(2) if mc2 else ""
 
-            match = matcher_produit(product_pdf, df_client) if not df_client.empty else None
+                    if mon_pdf == mon_c and yr_pdf == yr_c:
+                        return desc_raw  # retourner valeur originale
 
-            if match:
-                ligne_client = df_client[df_client["Descrizione"] == match].iloc[0]
-                client_long  = float(ligne_client["Client_Long"])
-                client_short = float(ligne_client["Client_Short"])
-                ecarts = []
-                if long_pdf != client_long:   ecarts.append("ÉCART LONG")
-                if short_pdf != client_short: ecarts.append("ÉCART SHORT")
-                status = ("⚠️ " + " & ".join(ecarts)) if ecarts else "✅ OK"
-            else:
-                match = client_long = client_short = ""
-                status = "❌ NON TROUVÉ"
-
-            resultats.append({
-                "Account":     account,
-                "Desc.Port.":  desc_match or "❌ onglet non trouvé",
-                "Product PDF": product_pdf,
-                "Descrizione": match,
-                "Long PDF":    long_pdf  if long_pdf  != 0 else "",
-                "Short PDF":   short_pdf if short_pdf != 0 else "",
-                "Client Long": client_long,
-                "Client Short":client_short,
-                "Status":      status,
-            })
-
-    return pd.DataFrame(resultats)
+    return None
