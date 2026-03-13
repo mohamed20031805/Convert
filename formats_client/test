@@ -1,42 +1,22 @@
-MAPPING_DIRECT = {
-    "IMM EURO FX":  "EURO FX CURR FUT",
-    "EURO FX":      "EURO FX CURR FUT",
-    "SWISS FRANC":  "CHF CURRENCY FUT",
-    "IMM SF":       "CHF CURRENCY FUT",
-    "EURO FX/SF":   "EUR/CHF FUTURE",
-    "EUR/CHF":      "EUR/CHF FUTURE",
-}
+python -c "
+import pdfplumber
+import re
 
-
-def matcher_produit(product_pdf, df_client):
-    product_upper = product_pdf.upper().strip()
-
-    # Extraire Mon + Yr depuis produit PDF
-    mc = re.search(
-        r'(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s*(\d{2})',
-        product_upper
-    )
-    mon_pdf = mc.group(1) if mc else ""
-    yr_pdf  = mc.group(2) if mc else ""
-
-    for cle_pdf, cle_client in MAPPING_DIRECT.items():
-        if cle_pdf.upper() in product_upper:
-            for _, row in df_client.iterrows():
-                # Nettoyer la description client : enlever *, espaces
-                desc_raw = str(row["Descrizione"])
-                desc     = desc_raw.upper().replace("*", "").strip()
-
-                if cle_client.upper() in desc:
-                    # Extraire Mon + Yr du client
-                    # "Mar26" ou "Mar 26" → les deux cas
-                    mc2 = re.search(
-                        r'(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s*(\d{2})',
-                        desc
-                    )
-                    mon_c = mc2.group(1) if mc2 else ""
-                    yr_c  = mc2.group(2) if mc2 else ""
-
-                    if mon_pdf == mon_c and yr_pdf == yr_c:
-                        return desc_raw  # retourner valeur originale
-
-    return None
+p = r'T:\Dallas\CSS-BOC\CTL\REC\Réconciliation dérivés listés\ASB AXION\2026\01. JANVIER\20260130_DLY_STMT.pdf'
+with pdfplumber.open(p) as pdf:
+    for i, page in enumerate(pdf.pages[:6]):
+        texte = page.extract_text() or ''
+        account = ''
+        client  = ''
+        for ligne in texte.split('\n'):
+            m = re.search(r'ACCOUNT NUMBER\s*:\s*(.+)', ligne)
+            if m:
+                account = m.group(1).strip()
+            if any(x in ligne.upper() for x in ['FUND', 'SICAV']) and \
+               not any(x in ligne for x in ['LME', 'DERIVATIVE', 'EXCHANGE']):
+                if ligne.strip() and len(ligne.strip()) > 5:
+                    client = ligne.strip()
+        print(f'Page {i+1} | Account: {account}')
+        print(f'         Client extrait: {repr(client)}')
+        print()
+"
